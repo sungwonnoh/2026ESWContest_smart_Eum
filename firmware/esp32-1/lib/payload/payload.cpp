@@ -26,6 +26,20 @@ const char* typeName(SensorType type){
     return "unknown";
 }
 
+bool parseSensorType(const char* name, SensorType& out) {
+    if (name == nullptr) return false;
+
+    if (strcmp(name, "presence") == 0) { out = SensorType::Presence; return true; }
+    if (strcmp(name, "motion")   == 0) { out = SensorType::Motion;   return true; }
+    if (strcmp(name, "door")     == 0) { out = SensorType::Door;     return true; }
+    if (strcmp(name, "power")    == 0) { out = SensorType::Power;    return true; }
+    if (strcmp(name, "bed")      == 0) { out = SensorType::Bed;      return true; }
+    if (strcmp(name, "light")    == 0) { out = SensorType::Light;    return true; }
+    if (strcmp(name, "climate")  == 0) { out = SensorType::Climate;  return true; }
+
+    return false;
+}
+
 uint8_t qosFor(SensorType type) {
     switch (type) {
         case SensorType::Motion:

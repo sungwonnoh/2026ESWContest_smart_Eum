@@ -71,6 +71,17 @@ Emulated deviceEmulated(const char* virtual_id, const char* device_type);
 std::string buildAnnounce(const char* node_id, uint32_t seq, uint32_t sent_ts, const char* fw, const Emulated* items, uint8_t count);
 
 
+struct SensorSlot {
+    const char* virtual_id;
+    SensorType  type;
+    const char* kind;      // "pir", "ld2410c", "dht22" ...
+    uint8_t     pin;
+};
+
+// 문자열을 SensorType 으로. 모르는 값이면 false
+bool parseSensorType(const char* name, SensorType& out);
+
+
 // ── 알림 수신·확인 ───────────────────────────
 extern const char* const ACK_DELIVERED;   // "DELIVERED"
 extern const char* const ACK_SEEN;        // "SEEN"

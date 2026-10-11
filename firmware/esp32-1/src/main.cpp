@@ -9,8 +9,9 @@
 #include "notify_store.h"
 #include "console.h"
 #include "secrets.h"
+#include "inventory.h"      
 
-static const char* MY_VIRTUAL_ID = "vd-10";
+static const char* displayId_ = nullptr;         // setup 에서 결정
 
 static WifiManager wifi(WIFI_SSID, WIFI_PASSWORD);
 static MqttNode    mqtt(wifi, MQTT_HOST, MQTT_PORT);
@@ -39,9 +40,8 @@ static void publishStatus() {
 }
 
 static void publishAnnounce() {
-    static const hestia::Emulated kEmulates[] = {
-        hestia::deviceEmulated(MY_VIRTUAL_ID, "display_node"),
-    };
+    hestia::Emulated em[12];
+    uint8_t n = buildEmulates(em, 12);
 
     uint32_t seq = 0;
     if (!seqs.next(nodeId(), seq)) {
@@ -51,25 +51,27 @@ static void publishAnnounce() {
 
     std::string topic   = hestia::nodeAnnounceTopic(nodeId());
     std::string payload = hestia::buildAnnounce(nodeId(), seq, nowTs(),
-                                                FW_VERSION, kEmulates, 1);
+                                                FW_VERSION, em, n);
     if (mqtt.publish(topic.c_str(), 1, false, payload.c_str())) {
         logInfo("ANN", "%s", payload.c_str());
     }
 }
 
 static void publishDeviceState() {
+    if (displayId_ == nullptr) return;
+
     const hestia::NotifyPush* top = notifies.latest();
     const char* nid = (top != nullptr) ? top->notify_id : nullptr;
 
     uint32_t seq = 0;
-    if (!seqs.next(MY_VIRTUAL_ID, seq)) {
+    if (!seqs.next(displayId_, seq)) {
         logError("DEV", "seq slots full");
         return;
     }
 
-    std::string topic = hestia::deviceStateTopic(MY_VIRTUAL_ID);
+    std::string topic = hestia::deviceStateTopic(displayId_);
     std::string payload = hestia::buildDisplayState(
-        MY_VIRTUAL_ID, seq, nowTs(), displayCurrent(), nid);
+        displayId_, seq, nowTs(), displayCurrent(), nid);
 
     if (mqtt.publish(topic.c_str(), 1, true, payload.c_str())) {
         logInfo("DEV", "%s", payload.c_str());
@@ -80,14 +82,16 @@ static void publishDeviceState() {
 }
 
 static void publishAck(const char* notify_id, const char* ack_type) {
+    if (displayId_ == nullptr) return; 
+
     uint32_t seq = 0;
-    if (!seqs.next(MY_VIRTUAL_ID, seq)) {
+    if (!seqs.next(displayId_, seq)) {
         logError("NOTI", "seq slots full");
         return;
     }
 
     std::string topic   = hestia::notifyAckTopic();
-    std::string payload = hestia::buildNotifyAck(MY_VIRTUAL_ID, seq, nowTs(),
+    std::string payload = hestia::buildNotifyAck(displayId_, seq, nowTs(),
                                                  notify_id, ack_type);
     if (mqtt.publish(topic.c_str(), 1, false, payload.c_str())) {
         logInfo("NOTI", "ack %s %s", ack_type, notify_id);
@@ -98,12 +102,14 @@ static void publishAck(const char* notify_id, const char* ack_type) {
 
 // ── 수신 ─────────────────────────────────────
 static void onNotifyPush(const char* payload, size_t len) {
+    if (displayId_ == nullptr) return; 
+
     JsonDocument doc;
     if (deserializeJson(doc, payload, len) != DeserializationError::Ok) {
         logWarn("NOTI", "push parse failed");
         return;
     }
-    if (!hestia::isForMe(doc, MY_VIRTUAL_ID)) {
+    if (!hestia::isForMe(doc, displayId_)) {
         return;                              // 남의 알림
     }
 
@@ -187,16 +193,25 @@ static void onConsoleLine(const char* line) {
 // ── 생명주기 ─────────────────────────────────
 void setup() {
     logInit(115200);
-    logInfo("BOOT", "HESTIA node=%s vid=%s fw=%s schema=%d",
-            nodeId(), MY_VIRTUAL_ID, FW_VERSION, SCHEMA_VERSION);
+    logInfo("BOOT", "HESTIA node=%s fw=%s schema=%d",
+            nodeId(), FW_VERSION, SCHEMA_VERSION);
 
-    consoleBegin(onConsoleLine);
+    inventoryBegin(NODE_SENSORS, NODE_DEVICES);
+    displayId_ = findDeviceByType("display_node");
+
+    if (displayId_ != nullptr) {
+        logInfo("BOOT", "display_node = %s", displayId_);
+        consoleBegin(onConsoleLine);
+    }
 
     wifi.begin();
     mqtt.begin();
     mqtt.setMessageHandler(onMessage);
-    mqtt.subscribe("hestia/notify/push", 1);
-    mqtt.subscribe("hestia/notify/cancel", 1);
+
+    if (displayId_ != nullptr) {
+        mqtt.subscribe("hestia/notify/push", 1);
+        mqtt.subscribe("hestia/notify/cancel", 1);
+    }
     mqtt.subscribe("hestia/system/profile", 1);
 }
 
