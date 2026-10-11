@@ -194,8 +194,12 @@ static void onConsoleLine(const char* line) {
         publishAck(nid, hestia::ACK_SEEN);
         return;
     }
+    if (strncmp(line, "adc ", 4) == 0) {
+        sensorsAdcDebug(strcmp(line + 4, "on") == 0);
+        return;
+    }
 
-    logWarn("CON", "unknown: %s  (try: seen, list)", line);
+    logWarn("CON", "unknown: %s  (try: seen, list, adc on/off)", line);
 }
 
 // ── 생명주기 ─────────────────────────────────
@@ -206,11 +210,12 @@ void setup() {
 
     inventoryBegin(NODE_SENSORS, NODE_DEVICES);
     displayId_ = findDeviceByType("display_node");
-    sensorsBegin(&seqs, mqttPublishFn); 
+    sensorsBegin(&seqs, mqttPublishFn);
+
+    consoleBegin(onConsoleLine);
 
     if (displayId_ != nullptr) {
         logInfo("BOOT", "display_node = %s", displayId_);
-        consoleBegin(onConsoleLine);
     }
 
     wifi.begin();
