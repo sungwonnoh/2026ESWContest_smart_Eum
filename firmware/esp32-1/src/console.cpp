@@ -24,6 +24,6 @@ void consoleTick() {
         } else if (len_ < sizeof(buf_) - 1) {
             buf_[len_++] = c;
             buf_[len_] = '\0';
-        }
+        } 
     }
 }

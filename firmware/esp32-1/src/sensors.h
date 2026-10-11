@@ -22,3 +22,5 @@ bool sensorNextSeq(const hestia::SensorSlot& slot, uint32_t& out_seq);
 
 // 토픽·QoS·retained 를 붙여 발행한다
 bool sensorPublish(const hestia::SensorSlot& slot, const std::string& payload);
+
+void sensorsAdcDebug(bool on);

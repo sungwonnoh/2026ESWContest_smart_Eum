@@ -5,6 +5,7 @@
 #include "sensors/pir.h"
 #include "sensors/reed.h"
 #include "sensors/dht22.h"
+#include "sensors/fsr.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -84,4 +85,8 @@ void sensorsResend() {
              dht22Begin(*s);
         }
     }
+}
+
+void sensorsAdcDebug(bool on) {
+    fsrSetDebug(on);
 }
