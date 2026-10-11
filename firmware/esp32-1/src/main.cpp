@@ -243,6 +243,7 @@ void loop() {
         publishStatus();
         publishAnnounce();
         publishDeviceState();        // 부팅 직후 display:"" — retained 청소
+        sensorsResend();
     } else if (tsChanged && mqttUp) {
         publishStatus();
     }
@@ -254,9 +255,7 @@ void loop() {
     if (mqttUp && millis() - lastDeviceState >= DEVICE_STATE_MS) {
         publishDeviceState();
     }
-    if (mqttUp) {
-        sensorsTick();
-    }
+    sensorsTick();
 
     delay(10);
 }

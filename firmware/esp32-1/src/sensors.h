@@ -14,6 +14,7 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish);
 
 // loop() 에서 매번.
 void sensorsTick();
+void sensorsResend();   // MQTT 재연결 직후
 
 // ── 드라이버가 쓰는 헬퍼 ─────────────────────
 // 이 slot 의 다음 seq. 슬롯이 가득 차면 false

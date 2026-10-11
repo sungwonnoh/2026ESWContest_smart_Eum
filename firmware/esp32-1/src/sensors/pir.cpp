@@ -61,3 +61,9 @@ void pirTick(const hestia::SensorSlot& slot) {
 
     sensorPublish(slot, hestia::buildMotion(slot.virtual_id, seq, nowTs(), now));
 }
+
+void pirResend(const hestia::SensorSlot& slot) {
+    (void)slot;
+    // motion 은 순간 이벤트이고 retained 가 아니다.
+    // "지금 움직임이 있다" 를 재전송하는 것은 의미가 없다.
+}
