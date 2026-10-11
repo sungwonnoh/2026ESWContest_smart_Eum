@@ -26,3 +26,5 @@ bool sensorPublish(const hestia::SensorSlot& slot, const std::string& payload);
 void sensorsAdcDebug(bool on);
 
 void sensorsCalibrate();
+
+void sensorsStats();

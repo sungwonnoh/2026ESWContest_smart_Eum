@@ -204,7 +204,12 @@ static void onConsoleLine(const char* line) {
         return;
     }
 
-    logWarn("CON", "unknown: %s  (try: seen, list, adc on/off, cal)", line);
+    if (strcmp(line, "stats") == 0) {
+        sensorsStats();
+        return;
+    }
+
+    logWarn("CON", "unknown: %s  (try: seen, list, adc on/off, cal, stats)", line);
 }
 
 // ── 생명주기 ─────────────────────────────────

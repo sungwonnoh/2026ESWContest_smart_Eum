@@ -7,6 +7,7 @@
 #include "sensors/dht22.h"
 #include "sensors/fsr.h"
 #include "sensors/ct.h"
+#include "sensors/ld2410.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -56,7 +57,9 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             fsrBegin(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctBegin(*s);
-        } else {
+        } else if (strcmp(s->kind, "ld2410c") == 0) {
+            ld2410Begin(*s);
+        }else {
             logError("SENS", "unknown kind \"%s\" for %s",
                      s->kind, s->virtual_id);
         }
@@ -78,6 +81,8 @@ void sensorsTick() {
             fsrTick(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctTick(*s);
+        } else if (strcmp(s->kind, "ld2410c") == 0) {
+            ld2410Begin(*s);
         }
     }
 }
@@ -97,6 +102,8 @@ void sensorsResend() {
             fsrResend(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctResend(*s);
+        } else if (strcmp(s->kind, "ld2410c") == 0) {
+            ld2410Begin(*s);
         }
     }
 }
@@ -104,8 +111,13 @@ void sensorsResend() {
 void sensorsAdcDebug(bool on) {
     fsrSetDebug(on);
     ctSetDebug(on);
+    ld2410SetDebug(on);
 }
 
 void sensorsCalibrate() {
     ctCalibrate();
+}
+
+void sensorsStats() {
+    ld2410Stats();
 }
