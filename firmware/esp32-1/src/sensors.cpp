@@ -4,6 +4,7 @@
 #include "time_sync.h"
 #include "sensors/pir.h"
 #include "sensors/reed.h"
+#include "sensors/dht22.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -47,6 +48,8 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             pirBegin(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedBegin(*s);
+        } else if (strcmp(s->kind, "dht22") == 0) {
+            dht22Begin(*s);
         } else {
             logError("SENS", "unknown kind \"%s\" for %s", s->kind, s->virtual_id);
         }
@@ -62,6 +65,8 @@ void sensorsTick() {
             pirTick(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedTick(*s);
+        } else if (strcmp(s->kind, "dht22") == 0) {
+            dht22Begin(*s);
         }
     }
 }
@@ -75,6 +80,8 @@ void sensorsResend() {
             pirResend(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedResend(*s);
+        } else if (strcmp(s->kind, "dht22") == 0) {
+             dht22Begin(*s);
         }
     }
 }
