@@ -10,6 +10,7 @@
 #include "console.h"
 #include "secrets.h"
 #include "inventory.h"      
+#include "sensors.h" 
 
 static const char* displayId_ = nullptr;         // setup 에서 결정
 
@@ -99,6 +100,13 @@ static void publishAck(const char* notify_id, const char* ack_type) {
         logWarn("NOTI", "ack publish failed");
     }
 }
+
+// 발행 함수를 sensors 에 넘기기 위한 래퍼
+static bool mqttPublishFn(const char* topic, uint8_t qos,
+                          bool retain, const char* payload) {
+    return mqtt.publish(topic, qos, retain, payload);
+}
+
 
 // ── 수신 ─────────────────────────────────────
 static void onNotifyPush(const char* payload, size_t len) {
@@ -198,6 +206,7 @@ void setup() {
 
     inventoryBegin(NODE_SENSORS, NODE_DEVICES);
     displayId_ = findDeviceByType("display_node");
+    sensorsBegin(&seqs, mqttPublishFn); 
 
     if (displayId_ != nullptr) {
         logInfo("BOOT", "display_node = %s", displayId_);
@@ -244,6 +253,9 @@ void loop() {
     }
     if (mqttUp && millis() - lastDeviceState >= DEVICE_STATE_MS) {
         publishDeviceState();
+    }
+    if (mqttUp) {
+        sensorsTick();
     }
 
     delay(10);
