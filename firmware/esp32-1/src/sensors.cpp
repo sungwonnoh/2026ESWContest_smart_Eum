@@ -6,6 +6,7 @@
 #include "sensors/reed.h"
 #include "sensors/dht22.h"
 #include "sensors/fsr.h"
+#include "sensors/ct.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -51,8 +52,13 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             reedBegin(*s);
         } else if (strcmp(s->kind, "dht22") == 0) {
             dht22Begin(*s);
+        } else if (strcmp(s->kind, "fsr") == 0) {
+            fsrBegin(*s);
+        } else if (strcmp(s->kind, "ct") == 0) {
+            ctBegin(*s);
         } else {
-            logError("SENS", "unknown kind \"%s\" for %s", s->kind, s->virtual_id);
+            logError("SENS", "unknown kind \"%s\" for %s",
+                     s->kind, s->virtual_id);
         }
     }
 }
@@ -67,7 +73,11 @@ void sensorsTick() {
         } else if (strcmp(s->kind, "reed") == 0) {
             reedTick(*s);
         } else if (strcmp(s->kind, "dht22") == 0) {
-            dht22Begin(*s);
+            dht22Tick(*s);
+        } else if (strcmp(s->kind, "fsr") == 0) {
+            fsrTick(*s);
+        } else if (strcmp(s->kind, "ct") == 0) {
+            ctTick(*s);
         }
     }
 }
@@ -82,11 +92,20 @@ void sensorsResend() {
         } else if (strcmp(s->kind, "reed") == 0) {
             reedResend(*s);
         } else if (strcmp(s->kind, "dht22") == 0) {
-             dht22Begin(*s);
+            dht22Resend(*s);
+        } else if (strcmp(s->kind, "fsr") == 0) {
+            fsrResend(*s);
+        } else if (strcmp(s->kind, "ct") == 0) {
+            ctResend(*s);
         }
     }
 }
 
 void sensorsAdcDebug(bool on) {
     fsrSetDebug(on);
+    ctSetDebug(on);
+}
+
+void sensorsCalibrate() {
+    ctCalibrate();
 }
