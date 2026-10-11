@@ -340,6 +340,32 @@ void test_notify_ack(void) {
 }
 
 
+void test_parse_sensor_type(void) {
+    SensorType t;
+    TEST_ASSERT_TRUE(parseSensorType("motion", t));
+    TEST_ASSERT_EQUAL(SensorType::Motion, t);
+
+    TEST_ASSERT_TRUE(parseSensorType("climate", t));
+    TEST_ASSERT_EQUAL(SensorType::Climate, t);
+
+    TEST_ASSERT_FALSE(parseSensorType("bogus", t));
+    TEST_ASSERT_FALSE(parseSensorType(nullptr, t));
+}
+
+// typeName 과 parseSensorType 이 왕복하는가
+void test_sensor_type_roundtrip(void) {
+    SensorType all[] = {
+        SensorType::Presence, SensorType::Motion, SensorType::Door,
+        SensorType::Power, SensorType::Bed, SensorType::Light, SensorType::Climate
+    };
+    for (int i = 0; i < 7; i++) {
+        SensorType back;
+        TEST_ASSERT_TRUE(parseSensorType(typeName(all[i]), back));
+        TEST_ASSERT_EQUAL(all[i], back);
+    }
+}
+
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
 
@@ -376,6 +402,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_parse_push_full);
     RUN_TEST(test_parse_push_missing_fields);
     RUN_TEST(test_notify_ack);
+
+    RUN_TEST(test_parse_sensor_type);
+    RUN_TEST(test_sensor_type_roundtrip);
 
     UNITY_END();
     return 0;
