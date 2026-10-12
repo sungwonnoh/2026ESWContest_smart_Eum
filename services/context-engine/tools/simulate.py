@@ -8,13 +8,16 @@
 양방향인 것이 핵심이다. mosquitto_pub 으로는 state 를 쏠 수 있지만
 cmd 를 받을 수 없어서, 제어가 먹혔는지 확인할 방법이 없다.
 
+엔진이 내보내는 것(context, 알림, 판정, t0 로그)도 함께 구독해 찍는다 —
+쏘기만 하고 결과를 못 보면 터미널 두 개를 번갈아 봐야 한다.
+
 점진 변화는 중간값을 보내지 않는다 — transition_ms 만큼 기다렸다가
 최종값 하나만 발행한다. 실제 기기도 대개 그렇고, 중간값이 오면
 엔진의 되돌림 판정이 그것을 사용자 조작으로 오인한다.
 
 실행:
     python tools/simulate.py
-    python tools/simulate.py --host 192.168.0.14
+    python tools/simulate.py --host 192.168.0.14 --config ./config-test
 """
 
 from __future__ import annotations
@@ -26,8 +29,9 @@ import queue
 import sys
 import threading
 import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -57,15 +61,30 @@ ACTION_EFFECT = {
 
 TRANSITION_KEY = "transition_ms"
 
+# 엔진이 내보내는 것들. 구독해서 찍는다.
+WATCH_TOPICS = [
+    ("hestia/context/+", 1),
+    ("hestia/notify/push", 1),
+    ("hestia/notify/speak", 1),
+    ("hestia/notify/cancel", 1),
+    ("hestia/intervention/decision", 1),
+    ("hestia/intervention/outcome", 1),
+    ("hestia/log/t0", 1),
+]
+
+GRID_STEP = 15
+GRID_N = 1440 // GRID_STEP
+
 
 class Simulator:
     """가전 상태를 들고 cmd 에 반응한다. 센서는 손으로 쏜다."""
 
-    def __init__(self, config: Config, host: str, port: int) -> None:
+    def __init__(self, config: Config, host: str, port: int, *, watch: bool = True) -> None:
         self._config = config
         self._host = host
         self._port = port
         self._running = False
+        self._watch = watch
 
         self.devices: dict[str, dict[str, Any]] = {
             d.id: dict(INITIAL.get(d.device_type, DEFAULT_INITIAL))
@@ -75,7 +94,12 @@ class Simulator:
         self._seq: dict[str, int] = {}
         # (적용할 시각, vid, params) — transition_ms 를 블로킹 없이 기다린다
         self._pending: list[tuple[float, str, dict[str, Any]]] = []
+        # (실행할 시각, 설명, 함수) — 시나리오 매크로의 단계들
+        self._script: list[tuple[float, str, Callable[[], None]]] = []
         self._input: queue.Queue[str] = queue.Queue()
+
+        self._last_notify_id: str | None = None
+        self._last_context: dict[str, str] = {}
 
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
@@ -104,6 +128,7 @@ class Simulator:
         while self._running:
             self._client.loop(timeout=0.1)
             self._apply_due()
+            self._run_script()
             self._drain_input()
 
         self._client.disconnect()
@@ -118,6 +143,9 @@ class Simulator:
             print(f"연결 거부 rc={reason_code}")
             return
         client.subscribe("hestia/device/+/cmd", qos=1)
+        if self._watch:
+            for topic, qos in WATCH_TOPICS:
+                client.subscribe(topic, qos)
 
         # 브로커가 껐다 켜지면 retained 가 사라진다. 다시 쏴야
         # 엔진이 현재 상태를 복원한다.
@@ -126,14 +154,125 @@ class Simulator:
         print(f"연결됨 — 가전 {len(self.devices)}대 상태 발행")
 
     def _on_message(self, client, userdata, msg) -> None:
+        topic = msg.topic
+
+        if topic.endswith("/cmd"):
+            try:
+                cmd = parse(topic, msg.payload, time.time())
+            except Exception as exc:                  # noqa: BLE001
+                print(f"파싱 실패: {exc}")
+                return
+            if isinstance(cmd, DeviceCommand):
+                self._handle_cmd(cmd)
+            return
+
+        if self._watch:
+            self._show_incoming(topic, msg.payload)
+
+    # ------------------------------------------------------------ 엔진 출력
+
+    def _show_incoming(self, topic: str, raw: bytes) -> None:
+        """엔진이 내보낸 것을 한 줄로 찍는다."""
         try:
-            cmd = parse(msg.topic, msg.payload, time.time())
-        except Exception as exc:                      # noqa: BLE001
-            print(f"파싱 실패: {exc}")
+            p = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return
-        if not isinstance(cmd, DeviceCommand):
+
+        stamp = datetime.now().strftime("%H:%M:%S")
+
+        if topic == "hestia/notify/push":
+            self._last_notify_id = p.get("notify_id")
+            body = p.get("payload", {})
+            proxy = f" [{p.get('proxy_for')} 대행]" if p.get("proxy_for") else ""
+            print(
+                f"\n{stamp} ■ 알림 {p.get('scenario')} → {p.get('channels')}{proxy}"
+                f"\n         {body.get('title')} / {body.get('text')}"
+                f"\n         notify_id={p.get('notify_id')} "
+                f"ack={p.get('requires_ack')} lv={p.get('escalation_level')}"
+            )
             return
-        self._handle_cmd(cmd)
+
+        if topic == "hestia/notify/speak":
+            print(f"{stamp} ♪ 음성 {p.get('text')}")
+            return
+
+        if topic == "hestia/notify/cancel":
+            print(f"{stamp} ✕ 취소 {p.get('notify_id')}")
+            return
+
+        if topic == "hestia/intervention/decision":
+            mark = "○" if p.get("candidate") else "·"
+            tail = p.get("tail_probability")
+            pred = p.get("predictability")
+            extra = ""
+            if tail is not None:
+                extra = f" tail={tail:.3f}"
+                if pred is not None:
+                    extra += f" pred={pred:.2f}"
+            peak = p.get("factors", {}).get("peak_center")
+            if peak is not None:
+                extra += f" peak={peak // 60}:{peak % 60:02d}"
+            print(f"{stamp} {mark} 판정 {p.get('kind')} {p.get('reason')}{extra}")
+            return
+
+        if topic == "hestia/intervention/outcome":
+            r = p.get("user_response", {})
+            print(
+                f"{stamp} ◆ 결과 {p.get('scenario')} "
+                f"acked={r.get('acked')} complied={r.get('complied')} "
+                f"채널={r.get('channels_tried')}"
+            )
+            return
+
+        if topic == "hestia/log/t0":
+            when = datetime.fromtimestamp(p.get("t0", 0)).strftime("%H:%M")
+            extra = ""
+            if p.get("eat_t0"):
+                extra = f" eat_t0={datetime.fromtimestamp(p['eat_t0']).strftime('%H:%M')}"
+            if p.get("method"):
+                extra += f" method={p['method']}"
+            print(
+                f"{stamp} ▣ t0 {p.get('type')} {when}"
+                f" dur={p.get('duration_sec', 0):.0f}s{extra}"
+            )
+            return
+
+        if topic.startswith("hestia/context/"):
+            name = topic.rsplit("/", 1)[-1]
+            line = self._context_line(name, p)
+            if line is None or self._last_context.get(name) == line:
+                return                                # 안 바뀌었으면 조용히
+            self._last_context[name] = line
+            print(f"{stamp} → {name:11} {line}")
+
+    @staticmethod
+    def _context_line(name: str, p: dict[str, Any]) -> str | None:
+        match name:
+            case "activity":
+                area = f" @{p['area']}" if p.get("area") else ""
+                return f"{p.get('state')}{area} conf={p.get('confidence')}"
+            case "presence":
+                here = [a for a, v in (p.get("areas") or {}).items() if v]
+                return f"user_area={p.get('user_area')} 재실={here}"
+            case "away":
+                return f"{p.get('state')} ({p.get('evidence')})"
+            case "occupancy":
+                return str(p.get("state"))
+            case "suppression":
+                if not p.get("active") and not p.get("cooldowns"):
+                    return "없음"
+                return f"{p.get('reason')} cooldowns={p.get('cooldowns')}"
+            case "day":
+                def hhmm(ts: float) -> str:
+                    return datetime.fromtimestamp(ts).strftime("%H:%M")
+                return (
+                    f"meals={[hhmm(t) for t in p.get('meals', [])]} "
+                    f"hyd={len(p.get('hydrations', []))} "
+                    f"med={len(p.get('medications', []))}"
+                )
+        return None
+
+    # ------------------------------------------------------------ cmd 처리
 
     def _handle_cmd(self, cmd: DeviceCommand) -> None:
         if cmd.target not in self.devices:
@@ -154,10 +293,10 @@ class Simulator:
         if delay_ms:
             # 전환 중에는 아무것도 보내지 않는다. 노드가 보간하고
             # 끝난 뒤 최종값만 보고하는 것이 실제 기기의 동작이다.
-            print(f"  cmd {cmd.target} {cmd.action} {label} ({delay_ms}ms 전환)")
+            print(f"  ← cmd {cmd.target} {cmd.action} {label} ({delay_ms}ms 전환)")
             self._pending.append((time.time() + delay_ms / 1000.0, cmd.target, params))
         else:
-            print(f"  cmd {cmd.target} {cmd.action} {label}")
+            print(f"  ← cmd {cmd.target} {cmd.action} {label} [{cmd.reason}]")
             self._set(cmd.target, **params)
 
     def _apply_due(self) -> None:
@@ -237,6 +376,12 @@ class Simulator:
             qos=1, retain=retain,
         )
 
+    def _publish_raw(self, topic: str, payload: dict[str, Any], *, retain: bool) -> None:
+        """센서도 가전도 아닌 것 — 모델, 복약 등록, ack."""
+        self._client.publish(
+            topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=retain
+        )
+
     def _next_seq(self, vid: str) -> int:
         self._seq[vid] = self._seq.get(vid, 0) + 1
         return self._seq[vid]
@@ -262,6 +407,9 @@ class Simulator:
             if s.type == stype and s.enabled:
                 return s.id
         return None
+
+    def _sensors_of_type(self, stype: str) -> list[str]:
+        return [s.id for s in self._config.all_sensors() if s.type == stype and s.enabled]
 
     # ------------------------------------------------------------ 입력
 
@@ -316,12 +464,41 @@ class Simulator:
                 self._presence(args, energy=45)
             case "still":
                 self._presence(args, energy=3)
+            case "motion":
+                self._motion(args)
             case "bed":
                 self._bed(args)
             case "door":
                 self._door(args)
             case "power":
                 self._power(args)
+            case "climate":
+                self._climate(args)
+            case "lux":
+                self._lux(args)
+            case "model":
+                self._model(args)
+            case "med":
+                self._med(args)
+            case "weather":
+                self._weather(args)
+            case "ack":
+                self._ack(args)
+            case "profile":
+                self._profile(args)
+            case "clear":
+                self._clear_retained()
+            case "home":
+                self._home()
+            case "out":
+                self._out()
+            case "scenario" | "sc":
+                self._scenario(args)
+            case "wait":
+                self._wait(args)
+            case "abort":
+                self._script.clear()
+                print("  예약 취소")
             case _:
                 print(f"모르는 명령: {verb} (help)")
 
@@ -337,10 +514,21 @@ class Simulator:
         print(f"  {vid} power={'ON' if on else 'OFF'}")
 
     def _light(self, args: list[str]) -> None:
-        vid = self._first_of_type("smart_light")
+        """light [area] <0-100|on|off> — area 를 주면 그 구역 조명."""
+        area = None
+        if args and args[0] in self._config.areas:
+            area, args = args[0], args[1:]
+
+        vid = None
+        for d in self._config.all_devices():
+            if d.device_type == "smart_light" and d.enabled:
+                if area is None or d.area == area:
+                    vid = d.id
+                    break
         if vid is None:
-            print("smart_light 가 설정에 없음")
+            print(f"smart_light 가 설정에 없음{f' ({area})' if area else ''}")
             return
+
         if not args or args[0] == "off":
             self._set(vid, power="OFF")
             print(f"  {vid} power=OFF")
@@ -352,7 +540,7 @@ class Simulator:
         try:
             level = int(args[0])
         except ValueError:
-            print("사용법: light <0-100|on|off>")
+            print("사용법: light [area] <0-100|on|off>")
             return
         self._set(vid, power="ON" if level else "OFF", brightness=level)
         print(f"  {vid} brightness={level}")
@@ -411,10 +599,29 @@ class Simulator:
         )
         print(f"  {vid} present={present} energy={energy if present else 0}")
 
-    def _bed(self, args: list[str]) -> None:
-        vid = self._sensor_of_type("bed")
+    def _motion(self, args: list[str]) -> None:
+        """motion <area> [off] — PIR. presence 와 다른 경로를 탄다."""
+        if not args:
+            print("사용법: motion <area> [off]")
+            return
+        area = args[0]
+        vid = self._sensor_in(area, "motion")
         if vid is None:
-            print("bed 센서가 없음")
+            print(f"{area} 에 motion 센서가 없음")
+            return
+        on = len(args) < 2 or args[1] != "off"
+        self._publish_sensor(vid, motion=on, confidence="low")
+        print(f"  {vid} motion={on}")
+
+    def _bed(self, args: list[str]) -> None:
+        """bed [area] [off] — area 를 주면 그 구역 압력 패드."""
+        area = None
+        if args and args[0] in self._config.areas:
+            area, args = args[0], args[1:]
+
+        vid = self._sensor_in(area, "bed") if area else self._sensor_of_type("bed")
+        if vid is None:
+            print(f"bed 센서가 없음{f' ({area})' if area else ''}")
             return
         occupied = not args or args[0] != "off"
         self._publish_sensor(vid, occupied=occupied)
@@ -445,6 +652,403 @@ class Simulator:
         self._publish_sensor(vid, watt=watt, state=state)
         print(f"  {vid} watt={watt} state={state}")
 
+    def _climate(self, args: list[str]) -> None:
+        """climate <온도> <습도> — HEAT_ONSET / DRY_ONSET 용."""
+        vid = self._sensor_of_type("climate")
+        if vid is None:
+            print("climate 센서가 없음")
+            return
+        temp = float(args[0]) if args else 24.0
+        hum = float(args[1]) if len(args) > 1 else 48.0
+        self._publish_sensor(vid, temperature_c=temp, humidity_pct=hum)
+        print(f"  {vid} {temp}°C {hum}%")
+
+    def _lux(self, args: list[str]) -> None:
+        vid = self._sensor_of_type("light")
+        if vid is None:
+            print("light 센서가 없음")
+            return
+        lux = float(args[0]) if args else 100.0
+        self._publish_sensor(vid, illuminance_lux=lux)
+        print(f"  {vid} {lux} lux")
+
+    # ------------------------------------------------------------ 모델·복약
+
+    def _model(self, args: list[str]) -> None:
+        """model [late|normal] — KDE 모델을 쏜다.
+
+        peaks 가 없으면 MEAL_PROMPT 도 식후 복약도 통째로 안 돈다.
+        배치(RPi4)가 보내는 것이지만 테스트에서는 여기서 만든다.
+
+            model          지금이 봉우리 한가운데 → TIME_NORMAL
+            model late     봉우리를 지남 → ANOMALY (식사 알림)
+        """
+        late = bool(args) and args[0] == "late"
+        now = datetime.now()
+        m = now.hour * 60 + now.minute
+
+        if late:
+            # 봉우리는 2시간 전. 지금은 구간 꼬리라 tail 이 바닥이다.
+            center, start, end = m - 120, m - 180, m + 60
+        else:
+            # 지금이 봉우리 중심. 뒤에 질량이 절반 남아 TIME_NORMAL.
+            center, start, end = m, m - 120, m + 120
+
+        # 두 번째 봉우리 — 겹치지 않게 멀리 둔다
+        c2, s2, e2 = m + 360, m + 300, m + 420
+
+        density = [0.0] * GRID_N
+        self._bump(density, center, weight=0.6)
+        self._bump(density, c2, weight=0.4)
+        total = sum(density)
+        density = [d / total for d in density]
+
+        payload = {
+            "version": SRC_VERSION,
+            "sent_ts": int(time.time()),
+            "src_id": "rpi4",
+            "trained_at": int(time.time()) - 3600,
+            "sample_days": 21,
+            "distributions": {
+                "meal_time": {
+                    "grid_min": 0,
+                    "grid_step": GRID_STEP,
+                    "density": density,
+                    "peaks": [
+                        self._peak(center, start, end),
+                        self._peak(c2, s2, e2),
+                    ],
+                },
+            },
+            "predictability": {"meal_time": 0.41},
+        }
+        self._publish_raw("hestia/model/kde", payload, retain=True)
+
+        def hm(x: int) -> str:
+            x %= 1440
+            return f"{x // 60}:{x % 60:02d}"
+
+        print(
+            f"  kde 발행 — 봉우리 {hm(center)} [{hm(start)}~{hm(end)}),"
+            f" {hm(c2)} [{hm(s2)}~{hm(e2)})"
+            f"  {'(지금은 꼬리)' if late else '(지금은 중심)'}"
+        )
+
+    @staticmethod
+    def _peak(center: int, start: int, end: int) -> dict[str, Any]:
+        return {
+            "center": center % 1440,
+            "from": start % 1440,
+            "to": end % 1440,
+            "predictability": 0.54,
+            "days_ratio": 1.0,
+            "meals_per_day": 1.0,
+        }
+
+    @staticmethod
+    def _bump(density: list[float], center_min: int, *, weight: float) -> None:
+        """center 주변 ±30분에 질량을 모은다."""
+        c = (center_min % 1440) // GRID_STEP
+        for off, share in ((0, 0.4), (-1, 0.2), (1, 0.2), (-2, 0.1), (2, 0.1)):
+            density[(c + off) % GRID_N] += weight * share
+
+    def _med(self, args: list[str]) -> None:
+        """med [clear] — 복약 등록을 쏜다.
+
+        감기약 = 식후 1분 (식사 묶음이 닫히고 1분 뒤)
+        혈압약 = 지금부터 2분 뒤 고정 시각
+        """
+        if args and args[0] == "clear":
+            payload = {
+                "version": SRC_VERSION, "sent_ts": int(time.time()),
+                "src_id": "rpi5-api", "medications": [],
+            }
+            self._publish_raw("hestia/registry/medications", payload, retain=True)
+            print("  복약 등록 비움")
+            return
+
+        today = date.today()
+        end = today + timedelta(days=4)
+        soon = datetime.now() + timedelta(minutes=2)
+
+        payload = {
+            "version": SRC_VERSION,
+            "sent_ts": int(time.time()),
+            "src_id": "rpi5-api",
+            "medications": [
+                {
+                    "id": "med-test-cold",
+                    "name": "감기약",
+                    "schedule": {"type": "after_meal", "delay_min": 1},
+                    "start_date": today.isoformat(),
+                    "days": 5,
+                    "end_date": end.isoformat(),
+                    "refill_notice": True,          # end_date 가 4일 뒤 → 재처방도 걸린다
+                },
+                {
+                    "id": "med-test-bp",
+                    "name": "혈압약",
+                    "schedule": {
+                        "type": "fixed",
+                        "times": [f"{soon.hour:02d}:{soon.minute:02d}"],
+                    },
+                    "start_date": today.isoformat(),
+                    "days": 30,
+                    "end_date": (today + timedelta(days=29)).isoformat(),
+                    "refill_notice": False,
+                },
+            ],
+        }
+        self._publish_raw("hestia/registry/medications", payload, retain=True)
+        print(
+            f"  복약 등록 — 감기약(식후 1분), "
+            f"혈압약({soon.hour:02d}:{soon.minute:02d} 고정)"
+        )
+
+    def _weather(self, args: list[str]) -> None:
+        """weather [on|off] — 폭염 특보. 엔진이 아직 구독하지 않는다."""
+        on = not args or args[0] != "off"
+        payload = {
+            "version": SRC_VERSION,
+            "sent_ts": int(time.time()),
+            "src_id": "rpi4",
+            "heat_advisory": on,
+            "temperature_c": 33.1 if on else 22.0,
+        }
+        self._publish_raw("hestia/external/weather", payload, retain=True)
+        print(f"  폭염 특보 {on} (엔진 미구독 — 발행만)")
+
+    def _ack(self, args: list[str]) -> None:
+        """ack [SEEN|DELIVERED] — 마지막 알림에 응답한다."""
+        if self._last_notify_id is None:
+            print("아직 받은 알림이 없음")
+            return
+        kind = args[0].upper() if args else "SEEN"
+        vid = self._first_of_type("display_node") or "vd-10"
+        payload = {
+            "version": SRC_VERSION,
+            "sent_ts": int(time.time()),
+            "src_id": vid,
+            "seq": self._next_seq(vid),
+            "notify_id": self._last_notify_id,
+            "ack_type": kind,
+        }
+        self._publish_raw("hestia/notify/ack", payload, retain=False)
+        print(f"  ack {kind} → {self._last_notify_id}")
+
+    def _profile(self, args: list[str]) -> None:
+        name = args[0].upper() if args else "DEMO"
+        payload = {
+            "version": SRC_VERSION, "sent_ts": int(time.time()),
+            "src_id": "rpi4", "profile": name,
+        }
+        self._publish_raw("hestia/system/profile", payload, retain=True)
+        print(f"  프로파일 {name}")
+
+    def _clear_retained(self) -> None:
+        """retained 를 전부 지운다. 스키마를 바꿨을 때 옛 값이 남는다."""
+        topics = ["hestia/model/kde", "hestia/registry/medications",
+                  "hestia/external/weather", "hestia/system/profile"]
+        for s in self._config.all_sensors():
+            topics.append(f"hestia/sensor/{s.id}/state")
+        for d in self._config.all_devices():
+            topics.append(f"hestia/device/{d.id}/state")
+        for t in topics:
+            self._client.publish(t, b"", qos=1, retain=True)
+        print(f"  retained {len(topics)}건 삭제")
+
+    # ------------------------------------------------------------ 묶음 명령
+
+    def _home(self) -> None:
+        """집에 있는 상태로 되돌린다 — 거실 재실, 나머지 비움."""
+        for area in self._config.areas:
+            vid = self._sensor_in(area, "presence")
+            if vid is None:
+                continue
+            here = area == "living"
+            self._publish_sensor(
+                vid, present=here, confidence="high",
+                energy=45 if here else 0, distance_cm=150 if here else 0,
+            )
+        print("  거실 재실, 나머지 구역 비움")
+
+    def _out(self) -> None:
+        """전 구역을 비운다. 현관문까지 여닫아 door_exit 근거를 만든다."""
+        for area in self._config.areas:
+            vid = self._sensor_in(area, "presence")
+            if vid:
+                self._publish_sensor(
+                    vid, present=False, confidence="high", energy=0, distance_cm=0
+                )
+        for vid in self._sensors_of_type("bed"):
+            self._publish_sensor(vid, occupied=False)
+        door = self._sensor_of_type("door")
+        if door:
+            self._publish_sensor(door, open=True)
+            self._after(1, "현관문 닫힘", lambda: self._publish_sensor(door, open=False))
+        print("  전 구역 비움 + 현관 개폐 — door_exit_quiet_sec 뒤 AWAY")
+
+    # ------------------------------------------------------------ 시나리오
+
+    def _after(self, delay: float, label: str, fn: Callable[[], None]) -> None:
+        self._script.append((time.time() + delay, label, fn))
+
+    def _run_script(self) -> None:
+        if not self._script:
+            return
+        now = time.time()
+        due = [s for s in self._script if s[0] <= now]
+        self._script = [s for s in self._script if s[0] > now]
+        for _, label, fn in due:
+            if label:
+                print(f"  ▶ {label}")
+            fn()
+
+    def _wait(self, args: list[str]) -> None:
+        sec = float(args[0]) if args else 10
+        self._after(sec, f"{sec:.0f}초 경과", lambda: None)
+        print(f"  {sec:.0f}초 뒤 표시")
+
+    def _scenario(self, args: list[str]) -> None:
+        if not args:
+            print(SCENARIOS)
+            return
+        name = args[0].lower()
+        runner = {
+            "meal": self._sc_meal,
+            "sleep": self._sc_sleep,
+            "hydration": self._sc_hydration,
+            "away": self._sc_away,
+            "safety": self._sc_safety,
+        }.get(name)
+        if runner is None:
+            print(SCENARIOS)
+            return
+        self._script.clear()
+        print(f"\n=== 시나리오 {name} ===")
+        runner()
+
+    def _sc_meal(self) -> None:
+        """조리 → 식사 → 이탈 → 묶음 종료 → 식후 복약.
+
+        config-test 기준: close_grace 20초, min_duration 15초.
+        """
+        kitchen = self._sensor_in("kitchen", "presence")
+        induction = next(
+            (s.id for s in self._config.all_sensors()
+             if s.type == "power" and "MEAL" in s.roles), None
+        )
+        if kitchen is None or induction is None:
+            print("주방 presence 또는 인덕션 전력 센서가 없음")
+            return
+
+        def pres(energy: int) -> Callable[[], None]:
+            return lambda: self._publish_sensor(
+                kitchen, present=True, confidence="high",
+                energy=energy, distance_cm=150,
+            )
+
+        self._after(0, "주방 입장", pres(45))
+        self._after(2, "인덕션 ON → COOKING", lambda: self._publish_sensor(
+            induction, watt=1200.0, state="ON"))
+        self._after(20, "인덕션 OFF", lambda: self._publish_sensor(
+            induction, watt=2.0, state="OFF"))
+        self._after(23, "냉장고 열고 닫기", self._fridge_cycle)
+        self._after(26, "주방 체류 저에너지 → EATING", pres(5))
+        self._after(50, "주방 이탈", lambda: self._publish_sensor(
+            kitchen, present=False, confidence="high", energy=0, distance_cm=0))
+        self._after(52, "거실로", lambda: self._presence(["living"], energy=45))
+        self._after(
+            80,
+            "묶음 종료 대기 — grace 20초 뒤 log/t0, 다시 1분 뒤 복약 알림",
+            lambda: None,
+        )
+
+    def _fridge_cycle(self) -> None:
+        vid = self._first_of_type("smart_fridge")
+        if vid is None:
+            return
+        self._set(vid, door="OPEN")
+        self._publish_event(vid, "door_opened")
+        self._after(2, "", lambda: (
+            self._set(vid, door="CLOSED"),
+            self._publish_event(vid, "door_closed", open_duration_sec=2.0),
+        ))
+
+    def _sc_sleep(self) -> None:
+        """침실 재실 → 정지 → 프로브 → 확정.
+
+        config-test 기준: probe_still 30초, no_channel 60초, timeout 10초.
+        침실 조명을 켜두면 dim 프로브, 꺼두면 긴 정지만으로 확정한다.
+        """
+        bedroom = self._sensor_in("bedroom", "presence")
+        pad = self._sensor_in("bedroom", "bed")
+        if bedroom is None:
+            print("침실 presence 센서가 없음")
+            return
+
+        self._after(0, "거실 비움", lambda: self._presence(["living", "off"], energy=0))
+        self._after(1, "침실 입장", lambda: self._publish_sensor(
+            bedroom, present=True, confidence="high", energy=45, distance_cm=120))
+        if pad:
+            self._after(3, "침대 점유", lambda: self._publish_sensor(pad, occupied=True))
+        self._after(5, "정지 시작 (energy 바닥)", lambda: self._publish_sensor(
+            bedroom, present=True, confidence="high", energy=2, distance_cm=120))
+        self._after(
+            45,
+            "프로브 발동 대기 — 조명이 켜져 있으면 dim, 아니면 60초 정지로 확정",
+            lambda: None,
+        )
+
+    def _sc_hydration(self) -> None:
+        """급수 → 간격 경과 → 알림.
+
+        config-test 기준: gap_sec 60초.
+        """
+        self._after(0, "집에 있음", self._home)
+        self._after(2, "급수 — 여기서 간격이 시작된다", lambda: self._dispense())
+        self._after(70, "간격 60초 경과 — LONG_GAP 알림이 나와야 한다", lambda: None)
+
+    def _dispense(self) -> None:
+        vid = self._first_of_type("water_purifier")
+        if vid:
+            self._publish_event(vid, "dispensed", water_type="AMBIENT", amount_ml=200)
+
+    def _sc_away(self) -> None:
+        """외출 → AWAY 확정 → 귀가 → 10분(테스트 20초) 뒤 수분 알림.
+
+        config-test 기준: door_exit_quiet 20초, return_min_away 30초,
+        return_delay 20초.
+        """
+        self._after(0, "외출 — 전 구역 비움 + 현관 개폐", self._out)
+        self._after(30, "AWAY 확정됐는지 확인 (context/away 를 보세요)", lambda: None)
+        self._after(45, "귀가 — 현관 개폐", self._come_back)
+        self._after(48, "거실 재실", self._home)
+        self._after(75, "귀가 20초 뒤 RETURNED_HOME 알림", lambda: None)
+
+    def _come_back(self) -> None:
+        door = self._sensor_of_type("door")
+        if door is None:
+            return
+        self._publish_sensor(door, open=True)
+        self._after(1, "", lambda: self._publish_sensor(door, open=False))
+
+    def _sc_safety(self) -> None:
+        """화장실 재실 → 정지 → 낙상 판정.
+
+        config-test 기준: still_sec 30초.
+        """
+        bath = self._sensor_in("bathroom", "presence")
+        if bath is None:
+            print("화장실 presence 센서가 없음")
+            return
+        self._after(0, "거실 비움", lambda: self._presence(["living", "off"], energy=0))
+        self._after(1, "화장실 입장", lambda: self._publish_sensor(
+            bath, present=True, confidence="high", energy=45, distance_cm=100))
+        self._after(4, "정지 — energy 바닥", lambda: self._publish_sensor(
+            bath, present=True, confidence="high", energy=2, distance_cm=100))
+        self._after(40, "30초 정지 — SAFETY 알림이 나와야 한다", lambda: None)
+
     # ------------------------------------------------------------ 출력
 
     def _show(self) -> None:
@@ -454,12 +1058,27 @@ class Simulator:
             print(f"  {vid:8} {d.device_type:16} {fields}")
         if self._pending:
             print(f"  전환 대기 {len(self._pending)}건")
+        if self._script:
+            print(f"  예약 단계 {len(self._script)}건")
+        if self._last_notify_id:
+            print(f"  마지막 알림 {self._last_notify_id}")
 
+
+SCENARIOS = """
+scenario <이름> — 단계를 시간 간격으로 자동 실행 (abort 로 취소)
+
+  meal       조리 → 식사 → 이탈 → 묶음 종료 → 식후 복약
+             먼저 'model' 과 'med' 를 쏴야 복약 알림이 나온다
+  sleep      침실 재실 → 정지 → 프로브 → 수면 확정
+  hydration  급수 → 간격 경과 → LONG_GAP 알림
+  away       외출 → AWAY → 귀가 → RETURNED_HOME 알림
+  safety     화장실 재실 → 정지 → 낙상 알림
+"""
 
 HELP = """
 가전
   tv [on|off]              TV 전원
-  light <0-100|on|off>     조명 밝기
+  light [area] <0-100|on|off>
   fridge [open|close]      냉장고 문
   washer [WASH|RINSE|SPIN|DONE]
   clean <start|stop|dock>  로봇 청소기
@@ -468,13 +1087,33 @@ HELP = """
 
 센서
   presence <area> [off]    재실 (energy 45)
-  still <area>             정지 (energy 3) — 낙상 판정용
-  bed [off]                침대 점유
+  still <area>             정지 (energy 3) — 낙상·수면 판정용
+  motion <area> [off]      PIR
+  bed [area] [off]         압력 패드
   door [open|close]        현관문
   power <vid> <watt>       전력 센서
+  climate <온도> <습도>     온습도 — HEAT_ONSET / DRY_ONSET
+  lux <값>                 조도
+
+배치·앱이 보내는 것
+  model [late]             KDE 모델. 없으면 식사·복약이 안 돈다
+                             (기본) 지금이 봉우리 중심 → TIME_NORMAL
+                             late   봉우리를 지남 → 식사 알림
+  med [clear]              복약 등록 (감기약 식후 1분 / 혈압약 2분 뒤)
+  weather [on|off]         폭염 특보 (엔진 미구독)
+  profile [REAL|DEMO]      프로파일 전환
+  ack [SEEN|DELIVERED]     마지막 알림에 응답
+
+묶음
+  home                     거실 재실, 나머지 비움
+  out                      전 구역 비움 + 현관 개폐 → AWAY
+  scenario <이름>           시나리오 자동 실행 (scenario 만 치면 목록)
+  wait <초>                그만큼 뒤에 표시
+  abort                    예약된 단계 취소
 
 기타
   state                    현재 가전 상태
+  clear                    retained 전부 삭제
   help / quit
 """
 
@@ -490,6 +1129,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("MQTT_PORT", "1883"))
     )
+    parser.add_argument(
+        "--no-watch", action="store_true",
+        help="엔진이 내보내는 것을 찍지 않는다",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.config)
@@ -499,7 +1142,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"설정 오류: {exc}")
         return 1
 
-    sim = Simulator(config, args.host, args.port)
+    sim = Simulator(config, args.host, args.port, watch=not args.no_watch)
     try:
         sim.run()
     except KeyboardInterrupt:
