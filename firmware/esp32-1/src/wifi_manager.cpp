@@ -13,6 +13,7 @@ WifiManager::WifiManager(const char* ssid, const char* password)
 void WifiManager::begin() {
     WiFi.mode(WIFI_STA);                    //ESP32의 Wi-Fi 칩의 두 역할 중 Station=> 공유기에 붙는 쪽
     WiFi.setAutoReconnect(true);            //ESP32의 자체 기능인 재연결(자체 기능은 한 번 성공했던 연결이 끊긴 경우에만 재시도)
+    //WiFi.setTxPower(WIFI_POWER_18_5dBm);   // TODO: 전원 안정화 후 제거
     WiFi.persistent(false);                 //Wi-Fi 설정(SSID, 비번)을 플래시 메모리에 저장하지 않음
     logInfo("WIFI", "ssid=\"%s\"", ssid_);
     startAttempt();                         //Wi-Fi 연결 시도, begin()은 시도 후 즉시 반환
