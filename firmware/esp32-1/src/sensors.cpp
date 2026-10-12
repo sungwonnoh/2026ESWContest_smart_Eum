@@ -4,7 +4,7 @@
 #include "time_sync.h"
 #include "sensors/pir.h"
 #include "sensors/reed.h"
-#include "sensors/dht22.h"
+#include "sensors/dht.h"
 #include "sensors/fsr.h"
 #include "sensors/ct.h"
 #include "sensors/ld2410.h"
@@ -51,8 +51,9 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             pirBegin(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedBegin(*s);
-        } else if (strcmp(s->kind, "dht22") == 0) {
-            dht22Begin(*s);
+        } else if (strcmp(s->kind, "dht11") == 0 ||
+           strcmp(s->kind, "dht22") == 0) {
+            dhtBegin(*s);
         } else if (strcmp(s->kind, "fsr") == 0) {
             fsrBegin(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
@@ -75,8 +76,9 @@ void sensorsTick() {
             pirTick(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedTick(*s);
-        } else if (strcmp(s->kind, "dht22") == 0) {
-            dht22Tick(*s);
+        } else if (strcmp(s->kind, "dht11") == 0 ||
+           strcmp(s->kind, "dht22") == 0) {
+            dhtBegin(*s);
         } else if (strcmp(s->kind, "fsr") == 0) {
             fsrTick(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
@@ -96,9 +98,10 @@ void sensorsResend() {
             pirResend(*s);
         } else if (strcmp(s->kind, "reed") == 0) {
             reedResend(*s);
-        } else if (strcmp(s->kind, "dht22") == 0) {
-            dht22Resend(*s);
-        } else if (strcmp(s->kind, "fsr") == 0) {
+        } else if (strcmp(s->kind, "dht11") == 0 ||
+           strcmp(s->kind, "dht22") == 0) {
+            dhtBegin(*s);
+        }else if (strcmp(s->kind, "fsr") == 0) {
             fsrResend(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctResend(*s);
