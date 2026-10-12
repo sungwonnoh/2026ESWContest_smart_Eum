@@ -1,5 +1,6 @@
 #include <unity.h>
 #include "payload.h"
+#include "ld2410_frame.h"
 
 using namespace hestia;
 
@@ -340,6 +341,178 @@ void test_notify_ack(void) {
 }
 
 
+void test_parse_sensor_type(void) {
+    SensorType t;
+    TEST_ASSERT_TRUE(parseSensorType("motion", t));
+    TEST_ASSERT_EQUAL(SensorType::Motion, t);
+
+    TEST_ASSERT_TRUE(parseSensorType("climate", t));
+    TEST_ASSERT_EQUAL(SensorType::Climate, t);
+
+    TEST_ASSERT_FALSE(parseSensorType("bogus", t));
+    TEST_ASSERT_FALSE(parseSensorType(nullptr, t));
+}
+
+// typeName 과 parseSensorType 이 왕복하는가
+void test_sensor_type_roundtrip(void) {
+    SensorType all[] = {
+        SensorType::Presence, SensorType::Motion, SensorType::Door,
+        SensorType::Power, SensorType::Bed, SensorType::Light, SensorType::Climate
+    };
+    for (int i = 0; i < 7; i++) {
+        SensorType back;
+        TEST_ASSERT_TRUE(parseSensorType(typeName(all[i]), back));
+        TEST_ASSERT_EQUAL(all[i], back);
+    }
+}
+
+
+// ── LD2410 파서 ──────────────────────────────
+using hestia::Ld2410Parser;
+using hestia::Ld2410Frame;
+
+// 정상 프레임 한 벌 (state=2 정지, detect=137cm)
+static const uint8_t GOOD[] = {
+    0xF4, 0xF3, 0xF2, 0xF1,
+    0x0D, 0x00,                          // len = 13
+    0x02, 0xAA,
+    0x02,                                // state = 정지
+    0x32, 0x00,                          // moving_dist = 50
+    0x14,                                // moving_energy = 20
+    0x89, 0x00,                          // static_dist = 137
+    0x3C,                                // static_energy = 60
+    0x89, 0x00,                          // detect_dist = 137
+    0x55, 0x00,
+    0xF8, 0xF7, 0xF6, 0xF5
+};
+
+static bool feedAll(Ld2410Parser& p, const uint8_t* buf, size_t n,
+                    Ld2410Frame& out) {
+    bool got = false;
+    for (size_t i = 0; i < n; i++) {
+        if (p.feed(buf[i], out)) got = true;
+    }
+    return got;
+}
+
+void test_ld_good_frame(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    TEST_ASSERT_TRUE(feedAll(p, GOOD, sizeof(GOOD), f));
+    TEST_ASSERT_EQUAL(2,   f.state);
+    TEST_ASSERT_EQUAL(50,  f.moving_dist_cm);
+    TEST_ASSERT_EQUAL(20,  f.moving_energy);
+    TEST_ASSERT_EQUAL(137, f.static_dist_cm);
+    TEST_ASSERT_EQUAL(60,  f.static_energy);
+    TEST_ASSERT_EQUAL(137, f.detect_dist_cm);
+    TEST_ASSERT_EQUAL(1,   p.frameCount());
+    TEST_ASSERT_EQUAL(0,   p.errorCount());
+}
+
+void test_ld_two_frames_back_to_back(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    feedAll(p, GOOD, sizeof(GOOD), f);
+    TEST_ASSERT_TRUE(feedAll(p, GOOD, sizeof(GOOD), f));
+    TEST_ASSERT_EQUAL(2, p.frameCount());
+}
+
+// 앞에 쓰레기 바이트가 붙어도 헤더를 찾아낸다
+void test_ld_leading_garbage(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t junk[] = { 0x00, 0xFF, 0x12, 0xF4, 0x99 };
+    feedAll(p, junk, sizeof(junk), f);
+
+    TEST_ASSERT_TRUE(feedAll(p, GOOD, sizeof(GOOD), f));
+    TEST_ASSERT_EQUAL(137, f.detect_dist_cm);
+}
+
+// F4 가 연속으로 와도 뒤쪽 헤더를 잡는다
+void test_ld_repeated_f4(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t pre[] = { 0xF4, 0xF4, 0xF3, 0xF4 };
+    feedAll(p, pre, sizeof(pre), f);
+
+    TEST_ASSERT_TRUE(feedAll(p, GOOD, sizeof(GOOD), f));
+    TEST_ASSERT_EQUAL(1, p.frameCount());
+}
+
+// 꼬리가 틀리면 버린다
+void test_ld_bad_tail(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t bad[sizeof(GOOD)];
+    memcpy(bad, GOOD, sizeof(GOOD));
+    bad[sizeof(GOOD) - 1] = 0x00;        // F5 -> 00
+
+    TEST_ASSERT_FALSE(feedAll(p, bad, sizeof(bad), f));
+    TEST_ASSERT_EQUAL(0, p.frameCount());
+    TEST_ASSERT_EQUAL(1, p.errorCount());
+}
+
+// 길이가 말이 안 되면 버퍼를 안 넘긴다
+void test_ld_absurd_length(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t bad[] = {
+        0xF4, 0xF3, 0xF2, 0xF1,
+        0xFF, 0xFF,                      // len = 65535
+        0x02, 0xAA
+    };
+    TEST_ASSERT_FALSE(feedAll(p, bad, sizeof(bad), f));
+    TEST_ASSERT_EQUAL(1, p.errorCount());
+}
+
+// 잘린 프레임 뒤에 정상 프레임이 와도 복구된다
+void test_ld_truncated_then_good(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    feedAll(p, GOOD, 10, f);             // 잘린 프레임
+    feedAll(p, GOOD, sizeof(GOOD), f);   // 이건 희생된다
+
+    TEST_ASSERT_TRUE(feedAll(p, GOOD, sizeof(GOOD), f));
+    TEST_ASSERT_EQUAL(1, p.frameCount());
+}
+
+// 기본 모드가 아니면(02 AA 아님) 버린다
+void test_ld_wrong_mode(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t bad[sizeof(GOOD)];
+    memcpy(bad, GOOD, sizeof(GOOD));
+    bad[6] = 0x01;                       // 02 -> 01 (engineering mode)
+
+    TEST_ASSERT_FALSE(feedAll(p, bad, sizeof(bad), f));
+    TEST_ASSERT_EQUAL(1, p.errorCount());
+}
+
+void test_ld_no_presence(void) {
+    Ld2410Parser p;
+    Ld2410Frame  f;
+
+    uint8_t none[sizeof(GOOD)];
+    memcpy(none, GOOD, sizeof(GOOD));
+    none[8]  = 0x00;                     // state = 0
+    none[15] = 0x00;                     // detect_dist = 0
+    none[16] = 0x00;
+
+    TEST_ASSERT_TRUE(feedAll(p, none, sizeof(none), f));
+    TEST_ASSERT_EQUAL(0, f.state);
+    TEST_ASSERT_EQUAL(0, f.detect_dist_cm);
+}
+
+
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
 
@@ -376,6 +549,19 @@ int main(int argc, char** argv) {
     RUN_TEST(test_parse_push_full);
     RUN_TEST(test_parse_push_missing_fields);
     RUN_TEST(test_notify_ack);
+
+    RUN_TEST(test_parse_sensor_type);
+    RUN_TEST(test_sensor_type_roundtrip);
+
+    RUN_TEST(test_ld_good_frame);
+    RUN_TEST(test_ld_two_frames_back_to_back);
+    RUN_TEST(test_ld_leading_garbage);
+    RUN_TEST(test_ld_repeated_f4);
+    RUN_TEST(test_ld_bad_tail);
+    RUN_TEST(test_ld_absurd_length);
+    RUN_TEST(test_ld_truncated_then_good);
+    RUN_TEST(test_ld_wrong_mode);
+    RUN_TEST(test_ld_no_presence);
 
     UNITY_END();
     return 0;
