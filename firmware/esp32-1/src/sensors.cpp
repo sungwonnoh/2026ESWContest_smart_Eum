@@ -8,6 +8,7 @@
 #include "sensors/fsr.h"
 #include "sensors/ct.h"
 #include "sensors/ld2410.h"
+#include "sensors/bh1750.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -60,7 +61,9 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             ctBegin(*s);
         } else if (strcmp(s->kind, "ld2410c") == 0) {
             ld2410Begin(*s);
-        }else {
+        } else if (strcmp(s->kind, "bh1750") == 0) {
+            bh1750Begin(*s);
+        } else {
             logError("SENS", "unknown kind \"%s\" for %s",
                      s->kind, s->virtual_id);
         }
@@ -85,7 +88,9 @@ void sensorsTick() {
             ctTick(*s);
         } else if (strcmp(s->kind, "ld2410c") == 0) {
             ld2410Begin(*s);
-        }
+        } else if (strcmp(s->kind, "bh1750") == 0) {
+            bh1750Begin(*s);
+        } 
     }
 }
 
@@ -107,7 +112,9 @@ void sensorsResend() {
             ctResend(*s);
         } else if (strcmp(s->kind, "ld2410c") == 0) {
             ld2410Begin(*s);
-        }
+        } else if (strcmp(s->kind, "bh1750") == 0) {
+            bh1750Begin(*s);
+        } 
     }
 }
 

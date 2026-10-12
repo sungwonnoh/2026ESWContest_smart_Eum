@@ -7,11 +7,13 @@
 
 static const uint8_t  MAX_PIR    = 4;
 static const uint32_t DEBOUNCE_MS = 200;
+static const uint32_t WARMUP_MS = 30000;   // 전원 후 안정화
 
 struct PirState {
     const char* id;
     bool        last;
     uint32_t    lastChange;
+    uint32_t    readyAt;
 };
 
 static PirState states_[MAX_PIR];
@@ -37,6 +39,7 @@ void pirBegin(const hestia::SensorSlot& slot) {
     states_[count_].id         = slot.virtual_id;
     states_[count_].last       = (digitalRead(slot.pin) == HIGH);
     states_[count_].lastChange = millis();
+    states_[count_].readyAt = millis() + WARMUP_MS;
     count_++;
 
     logInfo("PIR", "%s on pin %u, initial=%d",
@@ -47,11 +50,23 @@ void pirTick(const hestia::SensorSlot& slot) {
     PirState* st = findState(slot.virtual_id);
     if (st == nullptr) return;
 
-    bool now = (digitalRead(slot.pin) == HIGH);
-    if (now == st->last) return;                       // 변화 없음
+    uint32_t t   = millis();
+    bool     now = (digitalRead(slot.pin) == HIGH);
 
-    uint32_t t = millis();
-    if (t - st->lastChange < DEBOUNCE_MS) return;      // 너무 빠른 반전은 무시
+    if (st->readyAt != 0) {
+        if ((int32_t)(t - st->readyAt) < 0) {
+            st->last = now;                  // 상태만 따라감
+            return;
+        }
+        st->readyAt = 0;
+        st->last    = now;
+        logInfo("PIR", "%s warmup done, state=%d",
+                slot.virtual_id, now ? 1 : 0);
+        return;                              // 끝난 그 순간은 발행하지 않음
+    }
+
+    if (now == st->last) return;
+    if (t - st->lastChange < DEBOUNCE_MS) return;
 
     st->last       = now;
     st->lastChange = t;
