@@ -81,15 +81,15 @@ void sensorsTick() {
             reedTick(*s);
         } else if (strcmp(s->kind, "dht11") == 0 ||
            strcmp(s->kind, "dht22") == 0) {
-            dhtBegin(*s);
+            dhtTick(*s);
         } else if (strcmp(s->kind, "fsr") == 0) {
             fsrTick(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctTick(*s);
         } else if (strcmp(s->kind, "ld2410c") == 0) {
-            ld2410Begin(*s);
+            ld2410Tick(*s);
         } else if (strcmp(s->kind, "bh1750") == 0) {
-            bh1750Begin(*s);
+            bh1750Tick(*s);
         } 
     }
 }
@@ -105,15 +105,15 @@ void sensorsResend() {
             reedResend(*s);
         } else if (strcmp(s->kind, "dht11") == 0 ||
            strcmp(s->kind, "dht22") == 0) {
-            dhtBegin(*s);
+            dhtResend(*s);
         }else if (strcmp(s->kind, "fsr") == 0) {
             fsrResend(*s);
         } else if (strcmp(s->kind, "ct") == 0) {
             ctResend(*s);
         } else if (strcmp(s->kind, "ld2410c") == 0) {
-            ld2410Begin(*s);
+            ld2410Resend(*s);
         } else if (strcmp(s->kind, "bh1750") == 0) {
-            bh1750Begin(*s);
+            bh1750Resend(*s);
         } 
     }
 }

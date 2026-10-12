@@ -15,7 +15,7 @@ static const float DELTA_T_11 = 1.0f;
 static const float DELTA_H_11 = 5.0f;
 static const float DELTA_T_22 = 0.3f;
 static const float DELTA_H_22 = 2.0f;
-static const uint8_t  FAIL_WARN        = 10;
+static const uint8_t FAIL_WARN = 3;   // 임시. 확인 후 10 으로 복구
 
 struct DhtState {
     const char* id;
