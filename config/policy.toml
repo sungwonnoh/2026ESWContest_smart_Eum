@@ -423,6 +423,8 @@ return_delay_sec = 600          # 귀가 10분 뒤
 pause_start = "22:00"
 pause_end = "06:00"
 
+[weather]
+max_age_sec = 7200 
 
 [scenarios.meal]
 pause_start = "21:00"

@@ -1096,6 +1096,8 @@ class ScenarioRunner:
 
         # 더워짐·건조해짐 — 전이 시점에 한 번. 둘 다면 HEAT 가 우선
         if not self._air_stress_sent:
+            if self._heat_advisory():
+                return "HEAT_ADVISORY", now 
             if self._hot:
                 return "HEAT_ONSET", now
             if self._dry:
@@ -1216,7 +1218,7 @@ class ScenarioRunner:
         self._last_notify_at = now
         if reason in ("LONG_GAP", "SLEEP_END"):
             self._notify_count += 1
-        elif reason in ("HEAT_ONSET", "DRY_ONSET"):
+        elif reason in ("HEAT_ONSET", "DRY_ONSET", "HEAT_ADVISORY"):
             self._air_stress_sent = True
         elif reason == "DAILY_SHORT":
             self._daily_short_sent = True
@@ -1232,6 +1234,7 @@ class ScenarioRunner:
         default = {
             "LONG_GAP": "물 한 잔 드세요",
             "SLEEP_END": "일어나셨네요, 물 한 잔 드세요",
+            "HEAT_ADVISORY": "오늘 폭염 경보가 있어요. 물 자주 드세요",
             "HEAT_ONSET": "더운 날이에요, 물 한 잔 드세요",
             "DRY_ONSET": "공기가 건조해요, 물 한 잔 드세요",
             "DAILY_SHORT": "오늘 물을 조금 더 드시면 좋겠습니다",
@@ -1343,6 +1346,20 @@ class ScenarioRunner:
             if isinstance(st, ClimateState):
                 return st
         return None
+
+    def _heat_advisory(self) -> bool:
+        """폭염 특보가 떠 있는가.
+
+        RPi4 가 죽으면 retained 로 남은 어제 날씨가 계속 보인다.
+        오래된 값은 모른다고 본다.
+        """
+        w = self._world.weather
+        if w is None:
+            return False
+        max_age = float(self._config.value("weather", "max_age_sec", default=7200))
+        if w.age_sec(self._clock.now()) > max_age:
+            return False
+        return w.has("HEAT")
 
     def _hyd(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "hydration", key, default=default)
