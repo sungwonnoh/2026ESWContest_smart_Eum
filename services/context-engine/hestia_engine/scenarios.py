@@ -124,6 +124,9 @@ class ScenarioRunner:
         self._meal_ends: list[tuple[float, float]] = []      # (eat_t0, closed_at)
         self._refill_day: str | None = None                  # 재처방을 보낸 날
 
+        # 조명
+        self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
+
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
@@ -132,6 +135,7 @@ class ScenarioRunner:
         timers += self._hydration_prompt(context)
         timers += self._safety(context)
         timers += self._sleep_routine(context)
+        timers += self._night_light(context)
         timers += self._meal_prompt(context)
         timers += self._medication_prompt(context)
         timers += self._refill_prompt(context)
@@ -154,8 +158,6 @@ class ScenarioRunner:
         # 내려둔 조명은 사용자가 끈 뒤에 조용히 되돌린다
         self._restore_if_off()
 
-                # 내려둔 조명은 사용자가 끈 뒤에 조용히 되돌린다
-        self._restore_if_off()
         self._track_awake_areas(context)
 
         if self._probe is not None:
@@ -169,6 +171,7 @@ class ScenarioRunner:
                     kind="sleep", candidate=False, reason="WOKE",
                     factors={"area": self.asleep.area},
                 ))
+                self._night_light_on(self.asleep.area, now)
                 self._last_sleep_end_at = woke_at
                 self._notify_count = 0      # 깼으면 반복 카운터를 푼다
                 self._awake_areas = set()
@@ -879,6 +882,77 @@ class ScenarioRunner:
 
     def _refill_cfg(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "refill", key, default=default)
+
+
+    # ------------------------------------------------------------ NIGHT_LIGHT
+
+    def _night_light_on(self, area: str | None, now: float) -> None:
+        """자다 일어난 구역의 조명을 약하게 켠다.
+
+        _sleep_routine 의 WOKE 분기에서 부른다 — self.asleep 이 지워지기
+        전이어야 구역을 알 수 있다. 판정을 다시 하지 않고 거기에 얹는다.
+        """
+        if area is None:
+            return
+
+        # 패드 false 즉시 경로만 탄다. _woke_at 의 다른 경로(움직임이
+        # end_sustain_sec 지속)는 60초 늦어 이미 걸어간 뒤다.
+        bed = self._bed_in(area)
+        if bed is None or bed.occupied:
+            return
+
+        lights = self._controller.devices_of_type("smart_light", area)
+        if not lights:
+            return                      # 그 구역에 조명이 없다. 조용히 지나간다
+        vid = lights[0]
+
+        st = self._world.device(vid)
+        if st is not None and st.get("power") == "ON":
+            return                      # 사용자나 프로브가 쥐고 있다
+
+        level = int(self._nl_value("brightness", 15))
+        if self._controller.set(
+            vid, power="ON", brightness=level, reason="NIGHT_LIGHT"
+        ) is None:
+            return
+
+        self._nl = (vid, area, now)
+        log.info("야간 조명 %s %s%% (%s)", vid, level, area)
+
+    def _night_light(self, context: Any) -> list[tuple[str, float]]:
+        """켜둔 야간 조명을 거둔다."""
+        if self._nl is None:
+            return []
+        vid, area, on_at = self._nl
+        now = self._clock.now()
+
+        # 프로브가 가져갔으면 소등도 그쪽이 한다 — 확정 시 base 를 복구한다.
+        cmd = self._controller.last_for(vid)
+        if cmd is None or cmd.reason != "NIGHT_LIGHT":
+            self._nl = None
+            return []
+
+        if self._controller.reverted(vid):
+            self._nl = None             # 사용자가 손댔다. 손 뗀다
+            return []
+
+        timeout = float(self._nl_value("timeout_sec", 1800))
+        if now - on_at < timeout:
+            return [("night-light", on_at + timeout)]
+
+        # 그 구역에 아직 사람이 있으면 끄지 않는다. 안 돌아오는 것이
+        # 낙상일 수 있고, 쓰러진 사람 옆에서 불을 끄는 쪽이 더 나쁘다.
+        presence = getattr(context, "presence", None)
+        if presence is not None and presence.areas.get(area):
+            return [("night-light", now + timeout)]
+
+        self._controller.set(vid, power="OFF", reason="NIGHT_LIGHT")
+        self._nl = None
+        log.info("야간 조명 소등 %s", vid)
+        return []
+
+    def _nl_value(self, key: str, default: Any) -> Any:
+        return self._config.value("scenarios", "night_light", key, default=default)
 
 
     # ------------------------------------------------------------ 판정 발행
