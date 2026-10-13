@@ -10,7 +10,8 @@
 #include "console.h"
 #include "secrets.h"
 #include "inventory.h"      
-#include "sensors.h" 
+#include "sensors.h"
+#include "devices.h"
 
 static const char* displayId_ = nullptr;         // setup 에서 결정
 
@@ -53,7 +54,7 @@ static void publishAnnounce() {
     std::string topic   = hestia::nodeAnnounceTopic(nodeId());
     std::string payload = hestia::buildAnnounce(nodeId(), seq, nowTs(),
                                                 FW_VERSION, em, n);
-    if (mqtt.publish(topic.c_str(), 1, false, payload.c_str())) {
+    if (mqtt.publish(topic.c_str(), 1, true, payload.c_str())) {
         logInfo("ANN", "%s", payload.c_str());
     }
 }
@@ -155,11 +156,35 @@ static void onNotifyCancel(const char* payload, size_t len) {
     publishDeviceState();
 }
 
+static void onDeviceCmd(const char* topic, const char* payload, size_t len) {
+    char vid[24];
+    if (!hestia::parseDeviceCmdTopic(topic, vid, sizeof(vid))) {
+        return;                              // 형식이 아니다
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, len) != DeserializationError::Ok) {
+        logWarn("DEV", "cmd parse failed for %s", vid);
+        return;
+    }
+
+    hestia::DeviceCmd cmd = hestia::parseDeviceCmd(doc);
+    if (!cmd.valid) {
+        logWarn("DEV", "cmd missing required fields for %s", vid);
+        return;
+    }
+
+    logInfo("DEV", "cmd %s -> %s action=%s", cmd.cmd_id, vid, cmd.action);
+    devicesHandleCmd(vid, cmd);
+}
+
 static void onMessage(const char* topic, const char* payload, size_t len) {
     if (strcmp(topic, "hestia/notify/push") == 0) {
         onNotifyPush(payload, len);
     } else if (strcmp(topic, "hestia/notify/cancel") == 0) {
         onNotifyCancel(payload, len);
+    } else if (strncmp(topic, "hestia/device/", 14) == 0) {
+        onDeviceCmd(topic, payload, len);
     } else {
         logInfo("MQTT", "rx %s (%u bytes)", topic, (unsigned)len);
     }
@@ -221,6 +246,7 @@ void setup() {
     inventoryBegin(NODE_SENSORS, NODE_DEVICES);
     displayId_ = findDeviceByType("display_node");
     sensorsBegin(&seqs, mqttPublishFn);
+    devicesBegin(&seqs, mqttPublishFn);
 
     consoleBegin(onConsoleLine);
 
@@ -237,6 +263,7 @@ void setup() {
         mqtt.subscribe("hestia/notify/cancel", 1);
     }
     mqtt.subscribe("hestia/system/profile", 1);
+    mqtt.subscribe("hestia/device/+/cmd", 1);
 }
 
 void loop() {
@@ -258,6 +285,7 @@ void loop() {
         publishStatus();
         publishAnnounce();
         publishDeviceState();        // 부팅 직후 display:"" — retained 청소
+        devicesPublishAll();
         sensorsResend();
     } else if (tsChanged && mqttUp) {
         publishStatus();
@@ -269,6 +297,7 @@ void loop() {
     }
     if (mqttUp && millis() - lastDeviceState >= DEVICE_STATE_MS) {
         publishDeviceState();
+        devicesPublishAll();
     }
     sensorsTick();
 

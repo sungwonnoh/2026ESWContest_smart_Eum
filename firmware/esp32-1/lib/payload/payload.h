@@ -79,6 +79,12 @@ struct SensorSlot {
     uint8_t     pin;
 };
 
+struct DeviceSlot {
+    const char* virtual_id;
+    const char* device_type;   // "smart_light", "display_node" ...
+    uint8_t     pin;           // 255 = 핀 없음
+};
+
 // 문자열을 SensorType 으로. 모르는 값이면 false
 bool parseSensorType(const char* name, SensorType& out);
 
