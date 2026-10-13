@@ -67,6 +67,9 @@ REPLACEMENTS: list[tuple[str, str, str]] = [
 
     # --- 재처방
     ("retry_sec", "1800", "30"),
+
+    # --- 야간 조명
+    ("timeout_sec", "1800", "30"),
 ]
 
 # 정숙 시간대. 밤에 테스트하면 식사·수분 알림이 통째로 막힌다.
