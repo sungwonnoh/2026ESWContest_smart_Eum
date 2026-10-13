@@ -511,6 +511,183 @@ void test_ld_no_presence(void) {
     TEST_ASSERT_EQUAL(0, f.detect_dist_cm);
 }
 
+// ── 기기 명령 ────────────────────────────────
+void test_cmd_topic_parse(void) {
+    char vid[24];
+
+    TEST_ASSERT_TRUE(parseDeviceCmdTopic("hestia/device/vd-02/cmd",
+                                         vid, sizeof(vid)));
+    TEST_ASSERT_EQUAL_STRING("vd-02", vid);
+}
+
+void test_cmd_topic_reject(void) {
+    char vid[24];
+
+    TEST_ASSERT_FALSE(parseDeviceCmdTopic("hestia/device/vd-02/state",
+                                          vid, sizeof(vid)));
+    TEST_ASSERT_FALSE(parseDeviceCmdTopic("hestia/sensor/vs-01/cmd",
+                                          vid, sizeof(vid)));
+    TEST_ASSERT_FALSE(parseDeviceCmdTopic("hestia/device//cmd",
+                                          vid, sizeof(vid)));
+    TEST_ASSERT_FALSE(parseDeviceCmdTopic("hestia/device/a/b/cmd",
+                                          vid, sizeof(vid)));
+}
+
+void test_cmd_topic_buffer_too_small(void) {
+    char vid[4];
+    TEST_ASSERT_FALSE(parseDeviceCmdTopic("hestia/device/vd-02/cmd",
+                                          vid, sizeof(vid)));
+}
+
+void test_parse_cmd_full(void) {
+    const char* json =
+        "{\"version\":1,\"src_id\":\"rpi5\",\"sent_ts\":1760400000,"
+        "\"cmd_id\":\"c-7f3a\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\",\"params\":{\"power\":\"ON\","
+        "\"brightness\":15,\"color_temp\":2700},"
+        "\"reason\":\"NIGHT_LIGHT\"}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_TRUE(c.valid);
+    TEST_ASSERT_EQUAL_STRING("c-7f3a", c.cmd_id);
+    TEST_ASSERT_EQUAL_STRING("smart_light", c.device_type);
+    TEST_ASSERT_EQUAL_STRING("set", c.action);
+    TEST_ASSERT_TRUE(c.light.has_power);
+    TEST_ASSERT_EQUAL_STRING("ON", c.light.power);
+    TEST_ASSERT_TRUE(c.light.has_brightness);
+    TEST_ASSERT_EQUAL(15, c.light.brightness);
+    TEST_ASSERT_TRUE(c.light.has_color_temp);
+    TEST_ASSERT_EQUAL(2700, c.light.color_temp);
+}
+
+// params 에 일부만 오면 나머지는 has_* 가 false
+void test_parse_cmd_partial_params(void) {
+    const char* json =
+        "{\"version\":1,\"cmd_id\":\"c-1\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\",\"params\":{\"brightness\":30}}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_TRUE(c.valid);
+    TEST_ASSERT_FALSE(c.light.has_power);
+    TEST_ASSERT_TRUE(c.light.has_brightness);
+    TEST_ASSERT_EQUAL(30, c.light.brightness);
+    TEST_ASSERT_FALSE(c.light.has_color_temp);
+}
+
+void test_parse_cmd_no_params(void) {
+    const char* json =
+        "{\"cmd_id\":\"c-1\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\"}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_TRUE(c.valid);
+    TEST_ASSERT_FALSE(c.light.has_power);
+    TEST_ASSERT_FALSE(c.light.has_brightness);
+}
+
+void test_parse_cmd_missing_required(void) {
+    const char* json = "{\"device_type\":\"smart_light\",\"action\":\"set\"}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_FALSE(c.valid);          // cmd_id 없음
+}
+
+// 모르는 필드가 있어도 파싱은 통과한다
+void test_parse_cmd_unknown_fields(void) {
+    const char* json =
+        "{\"cmd_id\":\"c-1\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\",\"params\":{\"power\":\"ON\",\"hue\":120},"
+        "\"future_field\":{\"a\":1}}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_TRUE(c.valid);
+    TEST_ASSERT_TRUE(c.light.has_power);
+}
+
+// 타입이 틀리면 없는 것으로 본다
+void test_parse_cmd_wrong_types(void) {
+    const char* json =
+        "{\"cmd_id\":\"c-1\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\",\"params\":{\"brightness\":\"30\","
+        "\"power\":123}}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_TRUE(c.valid);
+    TEST_ASSERT_FALSE(c.light.has_brightness);
+    TEST_ASSERT_FALSE(c.light.has_power);
+}
+
+void test_parse_cmd_brightness_clamped(void) {
+    const char* json =
+        "{\"cmd_id\":\"c-1\",\"device_type\":\"smart_light\","
+        "\"action\":\"set\",\"params\":{\"brightness\":150}}";
+
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    DeviceCmd c = parseDeviceCmd(doc);
+
+    TEST_ASSERT_EQUAL(100, c.light.brightness);
+}
+
+// ── smart_light state ────────────────────────
+void test_light_state_full(void) {
+    std::string json = buildSmartLightState("vd-02", 3, 1760400001,
+                                            "ON", true, 15, true, 2700);
+    JsonDocument doc;
+    deserializeJson(doc, json);
+
+    TEST_ASSERT_EQUAL(1, doc["version"].as<int>());
+    TEST_ASSERT_EQUAL_STRING("vd-02", doc["src_id"].as<const char*>());
+    TEST_ASSERT_EQUAL(3, doc["seq"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("smart_light",
+                             doc["device_type"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("esp32", doc["source"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("ON", doc["power"].as<const char*>());
+    TEST_ASSERT_EQUAL(15,   doc["brightness"].as<int>());
+    TEST_ASSERT_EQUAL(2700, doc["color_temp"].as<int>());
+}
+
+// 받은 적 없는 값은 아예 빠진다
+void test_light_state_omits_unset(void) {
+    std::string json = buildSmartLightState("vd-02", 0, 1760400001,
+                                            "OFF", false, 0, false, 0);
+    JsonDocument doc;
+    deserializeJson(doc, json);
+
+    TEST_ASSERT_TRUE(doc["brightness"].isNull());
+    TEST_ASSERT_TRUE(doc["color_temp"].isNull());
+    TEST_ASSERT_EQUAL_STRING("OFF", doc["power"].as<const char*>());
+}
+
+// brightness 0 은 "없음" 이 아니라 값이다
+void test_light_state_brightness_zero_kept(void) {
+    std::string json = buildSmartLightState("vd-02", 0, 1760400001,
+                                            "ON", true, 0, false, 0);
+    JsonDocument doc;
+    deserializeJson(doc, json);
+
+    TEST_ASSERT_FALSE(doc["brightness"].isNull());
+    TEST_ASSERT_EQUAL(0, doc["brightness"].as<int>());
+}
+
 
 
 int main(int argc, char** argv) {
@@ -562,6 +739,20 @@ int main(int argc, char** argv) {
     RUN_TEST(test_ld_truncated_then_good);
     RUN_TEST(test_ld_wrong_mode);
     RUN_TEST(test_ld_no_presence);
+
+    RUN_TEST(test_cmd_topic_parse);
+    RUN_TEST(test_cmd_topic_reject);
+    RUN_TEST(test_cmd_topic_buffer_too_small);
+    RUN_TEST(test_parse_cmd_full);
+    RUN_TEST(test_parse_cmd_partial_params);
+    RUN_TEST(test_parse_cmd_no_params);
+    RUN_TEST(test_parse_cmd_missing_required);
+    RUN_TEST(test_parse_cmd_unknown_fields);
+    RUN_TEST(test_parse_cmd_wrong_types);
+    RUN_TEST(test_parse_cmd_brightness_clamped);
+    RUN_TEST(test_light_state_full);
+    RUN_TEST(test_light_state_omits_unset);
+    RUN_TEST(test_light_state_brightness_zero_kept);
 
     UNITY_END();
     return 0;

@@ -56,6 +56,7 @@ private:
 std::string buildStatus(const char* node_id, uint32_t sent_ts, bool online, bool ts_synced);
 std::string nodeStatusTopic(const char* node_id);
 std::string nodeAnnounceTopic(const char* node_id);
+std::string deviceCmdTopic(const char* virtual_id); 
 
 //노드(esp32보드) announce
 struct Emulated {
@@ -76,6 +77,12 @@ struct SensorSlot {
     SensorType  type;
     const char* kind;      // "pir", "ld2410c", "dht22" ...
     uint8_t     pin;
+};
+
+struct DeviceSlot {
+    const char* virtual_id;
+    const char* device_type;   // "smart_light", "display_node" ...
+    uint8_t     pin;           // 255 = 핀 없음
 };
 
 // 문자열을 SensorType 으로. 모르는 값이면 false
@@ -106,5 +113,39 @@ NotifyPush parseNotifyPush(const JsonDocument& doc);
 
 std::string buildNotifyAck(const char* src_id, uint32_t seq, uint32_t sent_ts,
                            const char* notify_id, const char* ack_type);
+
+
+// ── 기기 명령 수신 ───────────────────────────
+struct LightParams {
+    bool     has_power;
+    bool     has_brightness;
+    bool     has_color_temp;
+
+    char     power[12];        // "ON" / "OFF" / "STANDBY"
+    uint8_t  brightness;       // 0~100
+    uint16_t color_temp;       // 켈빈
+};
+
+struct DeviceCmd {
+    bool        valid;
+    char        cmd_id[32];
+    char        device_type[24];
+    char        action[12];
+    LightParams light;         // device_type 이 smart_light 일 때만 의미
+};
+
+DeviceCmd parseDeviceCmd(const JsonDocument& doc);
+
+// 토픽에서 virtual_id 추출. hestia/device/{vid}/cmd 형식이 아니면 false
+bool parseDeviceCmdTopic(const char* topic, char* out, size_t out_size);
+
+// ── 가전 state ───────────────────────────────
+// brightness · color_temp 는 받은 적 있을 때만 싣는다.
+// 변환값이 아니라 엔진에서 받은 값을 그대로 올려야 한다.
+std::string buildSmartLightState(const char* src_id, uint32_t seq,
+                                 uint32_t sent_ts,
+                                 const char* power,
+                                 bool has_brightness, uint8_t brightness,
+                                 bool has_color_temp, uint16_t color_temp);
 
 }  // namespace hestia
