@@ -118,6 +118,25 @@ class Ctx:
             if p["scenario"] == "HYDRATION_PROMPT"
         )
 
+    # --- 날씨
+
+    def weather(c, *, heat: bool = True, age_sec: float = 600.0,
+                type_: str = "HEAT", seq: int = 1):
+        """RPi4 의 실외 실황. observed_at 은 지금보다 age_sec 과거."""
+        now = c.clock.now()
+        return c.send("hestia/external/weather", {
+            "version": 1, "sent_ts": now, "src_id": "rpi4", "seq": seq,
+            "source": "kma",
+            "observed_at": now - age_sec,
+            "temperature_c": 31.2, "humidity_pct": 58.0,
+            "precip_1h_mm": 0.0, "precip_type": "NONE", "wind_speed_ms": 1.8,
+            "warnings": (
+                [{"name": "폭염경보", "type": type_, "level": "WARNING"}]
+                if heat else []
+            ),
+            "warnings_issued_at": now - age_sec,
+        })
+
     @property
     def runner(self):
         return self.engine.scenarios
@@ -442,3 +461,102 @@ def test_timer_path_triggers(c):
     c.sched.run_due()
 
     assert len(c.pushes()) == 1
+
+
+# ============================================================ 폭염 특보
+
+
+def weather(c, *, heat: bool = True, age_sec: float = 600.0,
+            type_: str = "HEAT", seq: int = 1):
+    """RPi4 의 실외 실황. observed_at 은 지금보다 age_sec 과거."""
+    now = c.clock.now()
+    return c.send("hestia/external/weather", {
+        "version": 1, "sent_ts": now, "src_id": "rpi4", "seq": seq,
+        "source": "kma",
+        "observed_at": now - age_sec,
+        "temperature_c": 31.2, "humidity_pct": 58.0,
+        "precip_1h_mm": 0.0, "precip_type": "NONE", "wind_speed_ms": 1.8,
+        "warnings": (
+            [{"name": "폭염경보", "type": type_, "level": "WARNING"}]
+            if heat else []
+        ),
+        "warnings_issued_at": now - age_sec,
+    })
+
+
+def test_heat_advisory_from_warning(c):
+    """실내가 아직 쾌적해도 특보가 떠 있으면 미리 알린다.
+
+    실내 센서로는 미래를 모른다 — 날씨를 받는 이유가 이것이다.
+    """
+    c.home()
+    c.climate(temp=22.0)
+    weather(c, heat=True)
+    c.tick()
+
+    assert "HEAT_ADVISORY" in c.reasons()
+    assert len(c.pushes()) == 1
+
+
+def test_heat_advisory_once_a_day(c):
+    c.home()
+    c.climate(temp=22.0)
+    weather(c, heat=True)
+    c.tick()
+
+    c.at(MORNING + HOUR)
+    weather(c, heat=True, seq=2)
+    c.tick()
+
+    assert len(c.pushes()) == 1
+
+
+def test_advisory_blocks_heat_onset(c):
+    """특보로 한 번 말했으면 실내가 더워져도 또 말하지 않는다.
+
+    둘 다 물 마시라는 말이라 반복으로 들린다.
+    """
+    c.home()
+    c.climate(temp=22.0)
+    weather(c, heat=True)
+    c.tick()
+    assert "HEAT_ADVISORY" in c.reasons()
+
+    c.at(MORNING + HOUR)
+    c.climate(temp=30.0, seq=2)
+    c.tick()
+
+    assert "HEAT_ONSET" not in c.reasons()
+    assert len(c.pushes()) == 1
+
+
+def test_stale_weather_ignored(c):
+    """RPi4 가 죽으면 retained 로 남은 어제 날씨가 계속 보인다.
+    그것으로 오늘을 판단하면 안 된다."""
+    c.home()
+    c.climate(temp=22.0)
+    weather(c, heat=True, age_sec=7300)      # max_age_sec 7200 초과
+    c.tick()
+
+    assert "HEAT_ADVISORY" not in c.reasons()
+    assert c.pushes() == ()
+
+
+def test_non_heat_warning_ignored(c):
+    """호우·한파는 수분과 무관하다. 겨울 건조는 실내 습도가 잡는다."""
+    c.home()
+    c.climate(temp=22.0)
+    weather(c, type_="RAIN")
+    c.tick()
+
+    assert "HEAT_ADVISORY" not in c.reasons()
+    assert c.pushes() == ()
+
+
+def test_indoor_heat_works_without_weather(c):
+    """날씨를 안 받아도 실내 온도로 HEAT_ONSET 이 나간다 — 회귀 확인."""
+    c.home()
+    c.climate(temp=30.0)
+    c.tick()
+
+    assert "HEAT_ONSET" in c.reasons()

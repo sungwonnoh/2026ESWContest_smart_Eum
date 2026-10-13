@@ -25,7 +25,7 @@ from datetime import datetime
 from .clock import Clock
 from .config import Config
 from .notify import Notifier
-from .world import PresenceState, BedState, ClimateState, WorldState
+from .world import PresenceState, BedState, ClimateState, LightState, WorldState
 from .policy import Decision, InterventionPolicy
 from .fsm import T0Entry
 from .model import MealPeak, peak_tail
@@ -133,6 +133,13 @@ class ScenarioRunner:
         self._meal_ends: list[tuple[float, float]] = []      # (eat_t0, closed_at)
         self._refill_day: str | None = None                  # 재처방을 보낸 날
 
+        # 조명
+        self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
+
+        self._dl: tuple[str, int] | None = None   # (vid, 바닥 밝기)
+        self._dl_at: float | None = None          # 마지막 조정
+        self._dl_hold: float | None = None        # 사용자 개입 유예 끝
+
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
@@ -141,6 +148,8 @@ class ScenarioRunner:
         timers += self._hydration_prompt(context)
         timers += self._safety(context)
         timers += self._sleep_routine(context)
+        timers += self._night_light(context)
+        timers += self._day_light(context)
         timers += self._meal_prompt(context)
         timers += self._medication_prompt(context)
         timers += self._refill_prompt(context)
@@ -163,8 +172,6 @@ class ScenarioRunner:
         # 내려둔 조명은 사용자가 끈 뒤에 조용히 되돌린다
         self._restore_if_off()
 
-                # 내려둔 조명은 사용자가 끈 뒤에 조용히 되돌린다
-        self._restore_if_off()
         self._track_awake_areas(context)
 
         if self._probe is not None:
@@ -178,6 +185,7 @@ class ScenarioRunner:
                     kind="sleep", candidate=False, reason="WOKE",
                     factors={"area": self.asleep.area},
                 ))
+                self._night_light_on(self.asleep.area, now)
                 self._last_sleep_end_at = woke_at
                 self._notify_count = 0      # 깼으면 반복 카운터를 푼다
                 self._awake_areas = set()
@@ -911,6 +919,175 @@ class ScenarioRunner:
         return self._config.value("scenarios", "refill", key, default=default)
 
 
+    # ------------------------------------------------------------ NIGHT_LIGHT
+
+    def _night_light_on(self, area: str | None, now: float) -> None:
+        """자다 일어난 구역의 조명을 약하게 켠다.
+
+        _sleep_routine 의 WOKE 분기에서 부른다 — self.asleep 이 지워지기
+        전이어야 구역을 알 수 있다. 판정을 다시 하지 않고 거기에 얹는다.
+        """
+        if area is None:
+            return
+
+        # 패드 false 즉시 경로만 탄다. _woke_at 의 다른 경로(움직임이
+        # end_sustain_sec 지속)는 60초 늦어 이미 걸어간 뒤다.
+        bed = self._bed_in(area)
+        if bed is None or bed.occupied:
+            return
+
+        lights = self._controller.devices_of_type("smart_light", area)
+        if not lights:
+            return                      # 그 구역에 조명이 없다. 조용히 지나간다
+        vid = lights[0]
+
+        st = self._world.device(vid)
+        if st is not None and st.get("power") == "ON":
+            return                      # 사용자나 프로브가 쥐고 있다
+
+        level = int(self._nl_value("brightness", 15))
+        if self._controller.set(
+            vid, power="ON", brightness=level, reason="NIGHT_LIGHT"
+        ) is None:
+            return
+
+        self._nl = (vid, area, now)
+        log.info("야간 조명 %s %s%% (%s)", vid, level, area)
+
+    def _night_light(self, context: Any) -> list[tuple[str, float]]:
+        """켜둔 야간 조명을 거둔다."""
+        if self._nl is None:
+            return []
+        vid, area, on_at = self._nl
+        now = self._clock.now()
+
+        # 프로브가 가져갔으면 소등도 그쪽이 한다 — 확정 시 base 를 복구한다.
+        cmd = self._controller.last_for(vid)
+        if cmd is None or cmd.reason != "NIGHT_LIGHT":
+            self._nl = None
+            return []
+
+        if self._controller.reverted(vid):
+            self._nl = None             # 사용자가 손댔다. 손 뗀다
+            return []
+
+        timeout = float(self._nl_value("timeout_sec", 1800))
+        if now - on_at < timeout:
+            return [("night-light", on_at + timeout)]
+
+        # 그 구역에 아직 사람이 있으면 끄지 않는다. 안 돌아오는 것이
+        # 낙상일 수 있고, 쓰러진 사람 옆에서 불을 끄는 쪽이 더 나쁘다.
+        presence = getattr(context, "presence", None)
+        if presence is not None and presence.areas.get(area):
+            return [("night-light", now + timeout)]
+
+        self._controller.set(vid, power="OFF", reason="NIGHT_LIGHT")
+        self._nl = None
+        log.info("야간 조명 소등 %s", vid)
+        return []
+
+    def _nl_value(self, key: str, default: Any) -> Any:
+        return self._config.value("scenarios", "night_light", key, default=default)
+
+
+    # ------------------------------------------------------------ DAY_LIGHT
+
+    def _day_light(self, context: Any) -> list[tuple[str, float]]:
+        """낮에 너무 어두우면 조명을 올린다.
+
+        '적정 밝기 유지' 가 아니라 '하한 보장' 이다. 시스템이 더한 몫만
+        되돌리고 사용자가 맞춘 밝기 아래로는 내리지 않는다.
+        """
+        now = self._clock.now()
+
+        hour = datetime.fromtimestamp(now, KST).hour
+        if not (
+            int(self._dl_value("day_start_hour", 8))
+            <= hour
+            < int(self._dl_value("day_end_hour", 18))
+        ):
+            # 저녁부터는 손대지 않는다. 어두워지면 사람이 직접 켜고,
+            # 그 시간대에 조명을 올리는 것은 수면에 나쁘다.
+            self._dl = None            # 다음 날 바닥을 다시 잡는다
+            return []
+
+        if self._dl_hold is not None and now < self._dl_hold:
+            return [("day-light", self._dl_hold)]
+
+        found = self._lux_area()
+        if found is None:
+            return []                  # 조도 센서가 없다
+        area, lux = found
+
+        presence = getattr(context, "presence", None)
+        if presence is None or not presence.areas.get(area):
+            return []                  # 아무도 없는 방을 밝힐 이유가 없다
+
+        lights = self._controller.devices_of_type("smart_light", area)
+        if not lights:
+            return []
+        vid = lights[0]
+
+        # 다른 시나리오가 쥐고 있거나 사용자가 손댔다
+        cmd = self._controller.last_for(vid)
+        if cmd is not None and cmd.reason != "DAY_LIGHT":
+            self._dl = None
+            return []
+        if self._controller.reverted(vid):
+            self._dl = None
+            self._dl_hold = now + float(self._dl_value("manual_override_sec", 7200))
+            return [("day-light", self._dl_hold)]
+
+        gap = float(self._dl_value("min_adjust_interval_sec", 60))
+        if self._dl_at is not None and now - self._dl_at < gap:
+            return [("day-light", self._dl_at + gap)]
+
+        cur = self._brightness_of(vid)
+        if cur is None:
+            return []                  # 조명 상태를 모른다
+
+        # 바닥은 처음 손대는 시점의 밝기다. 사용자가 맞춘 값이므로
+        # 그 아래로는 내리지 않는다.
+        if self._dl is None or self._dl[0] != vid:
+            self._dl = (vid, cur)
+        floor_level = self._dl[1]
+
+        step = int(self._dl_value("step", 10))
+        want = cur
+        if lux < float(self._dl_value("floor_lux", 300)):
+            want = min(100, cur + step)
+        elif lux > float(self._dl_value("ceiling_lux", 600)):
+            want = max(floor_level, cur - step)
+
+        if want == cur:
+            return [("day-light", now + gap)]
+
+        self._controller.set(
+            vid, power="ON", brightness=want, reason="DAY_LIGHT", priority="low",
+        )
+        self._dl_at = now
+        log.info("주간 조명 %s %s → %s%% (lux=%s)", vid, cur, want, round(lux))
+        return [("day-light", now + gap)]
+
+    def _lux_area(self) -> tuple[str, float] | None:
+        """조도 센서가 있는 구역과 그 값."""
+        for area in self._config.areas:
+            for s in self._world.sensors_of(area):
+                if isinstance(s, LightState):
+                    return area, s.lux
+        return None
+
+    def _brightness_of(self, vid: str) -> int | None:
+        st = self._world.device(vid)
+        if st is None or st.get("power") != "ON":
+            return 0 if st is not None else None
+        b = st.get("brightness")
+        return int(b) if b is not None else None
+
+    def _dl_value(self, key: str, default: Any) -> Any:
+        return self._config.value("scenarios", "day_light", key, default=default)
+
+
     # ------------------------------------------------------------ 판정 발행
 
     def _emit_decision(self, d: Decision) -> str | None:
@@ -949,6 +1126,8 @@ class ScenarioRunner:
 
         # 더워짐·건조해짐 — 전이 시점에 한 번. 둘 다면 HEAT 가 우선
         if not self._air_stress_sent:
+            if self._heat_advisory():
+                return "HEAT_ADVISORY", now 
             if self._hot:
                 return "HEAT_ONSET", now
             if self._dry:
@@ -1070,7 +1249,7 @@ class ScenarioRunner:
         self._last_notify_at = now
         if reason in ("LONG_GAP", "SLEEP_END"):
             self._notify_count += 1
-        elif reason in ("HEAT_ONSET", "DRY_ONSET"):
+        elif reason in ("HEAT_ONSET", "DRY_ONSET", "HEAT_ADVISORY"):
             self._air_stress_sent = True
         elif reason == "DAILY_SHORT":
             self._daily_short_sent = True
@@ -1086,6 +1265,7 @@ class ScenarioRunner:
         default = {
             "LONG_GAP": "물 한 잔\n드세요",
             "SLEEP_END": "일어나셨네요\n물 한 잔\n드세요",
+            "HEAT_ADVISORY": "폭염 경보예요\n물 자주\n드세요",
             "HEAT_ONSET": "더운 날이에요\n물 한 잔\n드세요",
             "DRY_ONSET": "공기가 건조해요\n물 한 잔\n드세요",
             "DAILY_SHORT": "오늘 물을\n조금 더\n드셔 보세요",
@@ -1098,6 +1278,7 @@ class ScenarioRunner:
         default = {
             "LONG_GAP": "물 드신 지 꽤 되었어요. 물 한 잔 드시고 잠시 쉬어 가세요.",
             "SLEEP_END": "푹 주무셨나요? 일어나셨으니 물 한 잔 드시면 몸이 한결 개운해져요.",
+            "HEAT_ADVISORY": "오늘 폭염 경보가 있어요. 더위에 지치지 않게 물을 자주 드시고, 시원하게 지내세요.",
             "HEAT_ONSET": "오늘은 날씨가 많이 덥네요. 땀으로 수분이 빠지니 물 한 잔 천천히 드세요.",
             "DRY_ONSET": "실내 공기가 건조해요. 목이 마르지 않아도 물 한 잔 드시면 좋아요.",
             "DAILY_SHORT": "오늘은 물을 조금 적게 드셨어요. 자기 전에 물 한 잔 더 드시면 좋겠어요.",
@@ -1209,6 +1390,20 @@ class ScenarioRunner:
             if isinstance(st, ClimateState):
                 return st
         return None
+
+    def _heat_advisory(self) -> bool:
+        """폭염 특보가 떠 있는가.
+
+        RPi4 가 죽으면 retained 로 남은 어제 날씨가 계속 보인다.
+        오래된 값은 모른다고 본다.
+        """
+        w = self._world.weather
+        if w is None:
+            return False
+        max_age = float(self._config.value("weather", "max_age_sec", default=7200))
+        if w.age_sec(self._clock.now()) > max_age:
+            return False
+        return w.has("HEAT")
 
     def _hyd(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "hydration", key, default=default)
