@@ -269,7 +269,7 @@ affinity = ["smart_tv", "smart_fridge", "display_node"]   # default 에도 필�
 affinity = ["smart_fridge", "smart_tv", "display_node"]
 comply_window_min = 30
 title = "수분 섭취"
-text = "물 한 잔 드세요"
+text = "물 한 잔\n드세요"
 
 [notify.MEDICATION_PROMPT]
 affinity = ["smart_fridge", "smart_tv"]
@@ -278,7 +278,7 @@ fire_and_forget = true
 cooldown_sec = 0          # 약마다 시각이 다르다 — 쿨다운으로 막지 않는다
 comply_window_min = 60
 title = "복약 시간"
-text = "식사 후 약 드실 시간입니다"
+text = "약 드실\n시간이에요"
 
 [notify.SAFETY]
 affinity = ["smart_tv", "smart_light", "display_node", "voice"]
@@ -289,7 +289,7 @@ expiry_sec = 3600
 cooldown_sec = 0
 max_escalation = 0               # 무제한. 응답할 때까지
 comply_window_min = 10
-title = "확인이 필요합니다"
+title = "확인 필요"
 text = "괜찮으신가요?"
 
 [notify.SLEEP_ROUTINE]
@@ -301,10 +301,11 @@ expiry_sec = 300
 cooldown_sec = 0
 comply_window_min = 0
 title = "확인"
-text = "지금 일어나계신가요?"
+text = "깨어 계신가요?"
 
 [notify.MEAL_PROMPT]
 title = "식사"
+text = "식사하셨나요?"       # 에스컬레이션 문구. 첫 발송은 시각이 들어간 문구를 코드가 만든다
 priority = "normal"
 cooldown_sec = 10800        # 3시간 — 끼니 간격보다 짧게
 channels = ["display", "voice"]
@@ -315,7 +316,7 @@ affinity = ["smart_fridge", "smart_tv"]
 requires_ack = false
 comply_window_min = 0
 title = "처방 안내"
-text = "약이 곧 떨어집니다"
+text = "약이 곧\n떨어져요"
 
 
 # ============================================================ 총량 제한

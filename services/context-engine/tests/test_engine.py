@@ -489,7 +489,7 @@ def test_meal_prompt_carries_medication(c):
         if t.startswith("hestia/notify") and p.get("scenario") == "MEAL_PROMPT"
     ]
     assert len(msgs) == 1
-    assert "감기약" in msgs[0]["payload"]["text"]
+    assert "약도 챙기세요" in msgs[0]["payload"]["text"]
     assert med_notifies(c) == []             # 복약은 따로 안 나간다
 
 
@@ -503,7 +503,7 @@ def test_meal_prompt_without_medication(c):
         p for _, t, p in c.pub.published
         if t.startswith("hestia/notify") and p.get("scenario") == "MEAL_PROMPT"
     ]
-    assert "잊지 마세요" not in msgs[0]["payload"]["text"]
+    assert "약도 챙기세요" not in msgs[0]["payload"]["text"]
 
 
 # ============================================================ MEDICATION_PROMPT
