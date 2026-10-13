@@ -465,6 +465,32 @@ def test_escalates_to_voice(esc):
     assert len(esc.of("notify/speak")) == 1
 
 
+def test_escalated_voice_keeps_original_text(esc):
+    """에스컬레이션은 처음 보낸 문구를 쓴다. 음성은 speech 를 읽는다."""
+    esc.device_on("vd-10", "display_node")
+    esc.send(scenario="TEST_ESCALATE", presence=presence_at("living"),
+             title="식사", text="8시00분쯤\n식사하셨나요?",
+             speech="식사 시간이 지났어요. 챙겨 드세요.")
+
+    esc.at(MORNING + 700)
+    esc.sched.run_due()
+
+    pushes = esc.of("notify/push")
+    assert pushes[-1]["payload"] == {"title": "식사", "text": "8시00분쯤\n식사하셨나요?"}
+    assert esc.of("notify/speak")[0]["text"] == "식사 시간이 지났어요. 챙겨 드세요."
+
+
+def test_speak_falls_back_to_text(esc):
+    """speech 를 안 주면 화면 문구를 읽는다."""
+    esc.device_on("vd-10", "display_node")
+    esc.send(scenario="TEST_ESCALATE", presence=presence_at("living"))
+
+    esc.at(MORNING + 700)
+    esc.sched.run_due()
+
+    assert esc.of("notify/speak")[0]["text"] == "본문"
+
+
 def test_escalation_stops_at_max(esc):
     esc.device_on("vd-05", "smart_fridge")
     nid = esc.send(scenario="TEST_ESCALATE")
