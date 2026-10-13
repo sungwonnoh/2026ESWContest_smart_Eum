@@ -184,6 +184,7 @@ class WorldState:
         self.devices: dict[str, DeviceState] = {}
         self.nodes: dict[str, bool] = {}        # node_id → online
         self.node_synced: dict[str, bool] = {}  # node_id → ts_synced
+        self.weather: m.WeatherMessage | None = None 
 
     # ------------------------------------------------------------ 조회
 
@@ -245,6 +246,8 @@ class WorldState:
                     return
                 self.nodes[msg.src_id] = msg.online
                 self.node_synced[msg.src_id] = msg.ts_synced
+            case m.WeatherMessage():
+                self.weather = msg
 
     # ------------------------------------------------------------ 센서
 

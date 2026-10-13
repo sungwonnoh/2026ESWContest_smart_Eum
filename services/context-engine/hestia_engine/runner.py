@@ -49,6 +49,7 @@ SUBSCRIBE = (
     "hestia/node/+/announce",
     "hestia/node/+/status",
     "hestia/model/+",
+    "hestia/external/weather",
     "hestia/registry/devices",
     "hestia/registry/medications",
     "hestia/system/profile",
