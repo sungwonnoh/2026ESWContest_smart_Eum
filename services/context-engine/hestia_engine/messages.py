@@ -534,6 +534,11 @@ PROFILE = frozenset({"REAL", "DEMO"})
 MODEL_NAME = frozenset({"kde", "hmm", "classifier"})
 MEDICATION_SCHEDULE = frozenset({"after_meal", "fixed"})
 
+# 기상청 코드를 그대로 받지 않는다. RPi4 가 영문 상수로 번역해 보낸다.
+PRECIP_TYPE = frozenset({"NONE", "RAIN", "SNOW", "SLEET", "SHOWER"})
+WARNING_TYPE = frozenset({"HEAT", "COLD", "RAIN", "SNOW", "WIND", "DUST", "DRY"})
+WARNING_LEVEL = frozenset({"ADVISORY", "WARNING"})
+
 
 @dataclass(frozen=True, slots=True)
 class NotifyAck(Message):
@@ -652,6 +657,48 @@ class ModelMessage(SystemMessage):
     name: str = ""
     trained_at: float = 0.0
     payload: dict = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherWarning:
+    """특보 한 건."""
+
+    name: str                            # 표시용 원문 ("폭염경보")
+    type: str                            # HEAT / COLD / ...
+    level: str                           # ADVISORY(주의보) / WARNING(경보)
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherMessage(SystemMessage):
+    """hestia/external/weather — RPi4 발행, retained.
+
+    실외 실황이다. 실내 온습도 센서를 대체하지 않는다 — 사람은 대부분
+    실내에 있고, 에어컨을 켜면 실외와 무관해진다.
+
+    엔진이 지금 쓰는 것은 warnings 와 observed_at 뿐이다. 나머지는
+    받아만 둔다 — RPi4 가 보내는 것을 거부할 이유가 없고, 환기나
+    외출 권유에 쓸 때 어휘가 이미 고정돼 있다.
+    """
+
+    source: str = ""                     # kma 등
+    observed_at: float = 0.0             # 관측 시각. sent_ts 와 다르다
+    temperature_c: float = 0.0
+    humidity_pct: float = 0.0
+    precip_1h_mm: float = 0.0
+    precip_type: str = "NONE"
+    wind_speed_ms: float = 0.0
+    warnings: tuple[WeatherWarning, ...] = ()
+    warnings_issued_at: float = 0.0
+
+    def has(self, type_: str) -> bool:
+        """그 종류의 특보가 떠 있는가."""
+        return any(w.type == type_ for w in self.warnings)
+
+    def age_sec(self, now: float) -> float:
+        """관측 이후 경과. RPi4 가 죽으면 retained 로 남은 어제 날씨가
+        계속 보인다 — 그것으로 오늘을 판단하면 안 된다.
+        """
+        return now - self.observed_at
 
 
 def parse_notify_ack(payload: dict, base: dict) -> NotifyAck:
@@ -812,6 +859,34 @@ def parse_model(name: str, payload: dict, base: dict) -> ModelMessage:
         payload=dict(payload),
     )
 
+
+def parse_weather(payload: dict, base: dict) -> WeatherMessage:
+    raw = _opt(payload, "warnings", list, []) or ()
+    warnings = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise SchemaError(f"warnings 항목이 객체가 아님: {item!r}")
+        warnings.append(
+            WeatherWarning(
+                name=_opt(item, "name", str) or "",
+                type=_one_of(item, "type", WARNING_TYPE),
+                level=_one_of(item, "level", WARNING_LEVEL),
+            )
+        )
+
+    return WeatherMessage(
+        **base,
+        source=_opt(payload, "source", str) or "",
+        observed_at=_req(payload, "observed_at", float),
+        temperature_c=_opt(payload, "temperature_c", float, 0.0),
+        humidity_pct=_opt(payload, "humidity_pct", float, 0.0),
+        precip_1h_mm=_opt(payload, "precip_1h_mm", float, 0.0),
+        precip_type=_one_of(payload, "precip_type", PRECIP_TYPE, required=False) or "NONE",
+        wind_speed_ms=_opt(payload, "wind_speed_ms", float, 0.0),
+        warnings=tuple(warnings),
+        warnings_issued_at=_opt(payload, "warnings_issued_at", float, 0.0),
+    )
+
 # ================================================================ 진입점
 
 
@@ -883,6 +958,10 @@ def _dispatch(parts: list[str], payload: dict, recv_ts: float) -> Message | None
         case ["hestia", "model", name]:
             src = _req(payload, "src_id", str)
             return parse_model(name, payload, check_envelope(payload, recv_ts, src))
+
+        case ["hestia", "external", "weather"]:
+            src = _req(payload, "src_id", str)
+            return parse_weather(payload, check_envelope(payload, recv_ts, src))
 
         case ["hestia", "registry", "devices"]:
             src = _req(payload, "src_id", str)

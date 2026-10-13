@@ -14,7 +14,7 @@ from hestia_engine.scenarios import DISPLAY_COLS, ScenarioRunner
 
 POLICY = Path(__file__).resolve().parents[3] / "config" / "policy.toml"
 MAX_LINES = 4
-REASONS = ("LONG_GAP", "SLEEP_END", "HEAT_ONSET", "DRY_ONSET",
+REASONS = ("LONG_GAP", "SLEEP_END", "HEAT_ADVISORY", "HEAT_ONSET", "DRY_ONSET",
            "DAILY_SHORT", "RETURNED_HOME")
 
 

@@ -81,6 +81,13 @@ roles = ["MEAL_HEAT"]
 power_profile = "microwave"
 node = "esp32-1"
 
+[[sensors]]
+id = "vs-15"
+type = "light"
+area = "living"
+roles = ["LIVING"]
+node = "esp32-1"
+
 [[devices]]
 id = "vd-01"
 device_type = "smart_tv"
