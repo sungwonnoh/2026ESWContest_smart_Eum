@@ -14,12 +14,8 @@ static char deviceBuf_[128];
 static hestia::SensorSlot sensors_[MAX_SENSORS];
 static uint8_t            sensorCount_ = 0;
 
-struct DeviceSlot {
-    const char* virtual_id;
-    const char* device_type;
-};
-static DeviceSlot devices_[MAX_DEVICES];
-static uint8_t    deviceCount_ = 0;
+static hestia::DeviceSlot devices_[MAX_DEVICES];
+static uint8_t            deviceCount_ = 0;
 
 // ── 파싱 ─────────────────────────────────────
 static void parseSensors(char* buf) {
@@ -56,6 +52,7 @@ static void parseSensors(char* buf) {
     }
 }
 
+// "vd-02:smart_light:26" 또는 "vd-10:display_node" — 핀은 선택
 static void parseDevices(char* buf) {
     char* save1 = nullptr;
     char* item  = strtok_r(buf, ",", &save1);
@@ -69,12 +66,15 @@ static void parseDevices(char* buf) {
         char* save2 = nullptr;
         char* vid   = strtok_r(item, ":", &save2);
         char* dtype = strtok_r(nullptr, ":", &save2);
+        char* pin   = strtok_r(nullptr, ":", &save2);
 
         if (vid == nullptr || dtype == nullptr) {
             logError("INV", "malformed device entry, skipped");
         } else {
             devices_[deviceCount_].virtual_id  = vid;
             devices_[deviceCount_].device_type = dtype;
+            devices_[deviceCount_].pin =
+                (pin != nullptr) ? (uint8_t)atoi(pin) : 255;
             deviceCount_++;
         }
         item = strtok_r(nullptr, ",", &save1);
@@ -105,8 +105,14 @@ void inventoryBegin(const char* sensors_flag, const char* devices_flag) {
                 sensors_[i].pin);
     }
     for (uint8_t i = 0; i < deviceCount_; i++) {
-        logInfo("INV", "device %s type=%s",
-                devices_[i].virtual_id, devices_[i].device_type);
+        if (devices_[i].pin == 255) {
+            logInfo("INV", "device %s type=%s",
+                    devices_[i].virtual_id, devices_[i].device_type);
+        } else {
+            logInfo("INV", "device %s type=%s pin=%u",
+                    devices_[i].virtual_id, devices_[i].device_type,
+                    devices_[i].pin);
+        }
     }
 }
 
@@ -118,6 +124,10 @@ const hestia::SensorSlot* sensorAt(uint8_t i) {
 }
 
 uint8_t deviceCount() { return deviceCount_; }
+
+const hestia::DeviceSlot* deviceAt(uint8_t i) {
+    return (i < deviceCount_) ? &devices_[i] : nullptr;
+}
 
 const char* deviceVirtualIdAt(uint8_t i) {
     return (i < deviceCount_) ? devices_[i].virtual_id : nullptr;

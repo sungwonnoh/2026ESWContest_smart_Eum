@@ -15,6 +15,7 @@ const hestia::SensorSlot*   sensorAt(uint8_t i);
 uint8_t     deviceCount();
 const char* deviceVirtualIdAt(uint8_t i);
 const char* deviceTypeAt(uint8_t i);
+const hestia::DeviceSlot* deviceAt(uint8_t i);
 
 // device_type 으로 virtual_id 를 찾는다. 없으면 nullptr
 const char* findDeviceByType(const char* device_type);
