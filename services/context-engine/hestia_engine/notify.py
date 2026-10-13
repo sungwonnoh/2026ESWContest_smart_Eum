@@ -78,6 +78,9 @@ class PendingNotify:
     baseline_at: float | None = None         # 발송 시점의 마지막 기록 시각. 이보다 뒤여야 comply
     closed_at: float | None = None           # 알림이 닫힌 시각. None이면 진행 중
     closed_reason: str | None = None         # SEEN / TIMEOUT / EXPIRED / CANCELLED
+    title: str = ""                          # 화면 제목. 에스컬레이션 재발송에 그대로 쓴다
+    text: str = ""                           # 화면 본문 (8글자 4줄)
+    speech: str | None = None                # 음성 문구. 없으면 text 를 읽는다
 
     @property
     def is_open(self) -> bool:              # 현재 진행 중인 알림인가. 진행 중이면 True
@@ -368,8 +371,9 @@ class Notifier:
         comply_area: str | None = None,
         decision_id: str | None = None,
         confidence: float = 0.0,
+        speech: str | None = None,
     ) -> str | None:
-        """알림을 발송한다. 못 보내면 None 과 함께 이유를 로그에 남긴다."""
+        """알림을 발송한다. speech 는 음성 채널로 읽을 문구 — 화면은 좁아서 짧게, 음성은 길고 친절하게 따로 쓴다. 못 보내면 None 과 함께 이유를 로그에 남긴다."""
         now = self._clock.now()
 
         # 같은 시나리오가 진행 중이면 겹쳐 보내지 않는다
@@ -416,6 +420,9 @@ class Notifier:
             comply_check=comply_check,
             comply_area=comply_area,
             baseline_at=self._done_at(comply_kind),
+            title=title,
+            text=text,
+            speech=speech,
         )
         self.store.add(pending)
         if not self.limits.is_exempt(scenario):
@@ -520,9 +527,8 @@ class Notifier:
         )
         self.store.update(escalated)
 
-        title = str(self._policy(n.scenario, "title", default=""))
-        text = str(self._policy(n.scenario, "text", default=""))
-        self._push(escalated, title, text)
+        # 처음 보낸 문구를 그대로 쓴다. 시각·약 이름 같은 맥락이 policy 에는 없다.
+        self._push(escalated, n.title, n.text)
         self._sched.at(
             deadline,
             lambda: self._on_deadline(notify_id),
@@ -577,7 +583,7 @@ class Notifier:
                 "sent_ts": int(self._clock.now()),
                 "src_id": SRC_ID,
                 "notify_id": n.notify_id,
-                "text": text,
+                "text": n.speech or text,
                 "cache_key": n.scenario.lower(),
                 "priority": n.priority,
             }, False)
