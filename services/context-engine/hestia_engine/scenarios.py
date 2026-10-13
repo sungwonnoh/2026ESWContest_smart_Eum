@@ -35,6 +35,15 @@ log = logging.getLogger(__name__)
 SRC_ID = "rpi5"
 SCHEMA_VERSION = 1
 
+# 알림 문구는 8글자 4줄 디스플레이에 그대로 뜬다. 제목 1줄 + 본문 3줄 안에 쓴다.
+# 줄 나눔은 "\n" 으로 직접 한다 — 디스플레이가 알아서 자르면 단어 중간에서 끊긴다.
+DISPLAY_COLS = 8
+
+
+def _fit(name: str, cols: int = DISPLAY_COLS) -> str:
+    """한 줄에 들어가도록 자른다. 약 이름처럼 길이를 정할 수 없는 값에 쓴다."""
+    return name if len(name) <= cols else name[: cols - 1] + "…"
+
 
 @dataclass(frozen=True, slots=True)
 class SleepProbe:
@@ -256,11 +265,15 @@ class ScenarioRunner:
             scenario="SLEEP_ROUTINE",
             title=str(self._notify_value("SLEEP_ROUTINE", "title", "확인")),
             text=str(self._notify_value(
-                "SLEEP_ROUTINE", "text", "지금 일어나계신가요?"
+                "SLEEP_ROUTINE", "text", "깨어 계신가요?"
             )),
             priority=str(self._notify_value("SLEEP_ROUTINE", "priority", "low")),
             presence=getattr(context, "presence", None),
             suppression=getattr(context, "suppression", None),
+            speech=str(self._notify_value(
+                "SLEEP_ROUTINE", "speech",
+                "혹시 아직 깨어 계신가요? 늦은 시간이라 불편하신 데는 없는지 궁금해서요.",
+            )),
         )
         if notify_id is None:
             return None
@@ -589,9 +602,16 @@ class ScenarioRunner:
 
             self._notifier.send(
                 scenario="SAFETY",
-                title=str(self._notify_value("SAFETY", "title", "확인이 필요합니다")),
-                text=str(self._notify_value("SAFETY", "text", "괜찮으신가요?")),
+                title=str(self._notify_value("SAFETY", "title", "확인 필요")),
+                text=str(self._notify_value(
+                    "SAFETY", "text", "괜찮으신가요?"
+                )),
                 priority="health",
+                speech=str(self._notify_value(
+                    "SAFETY", "speech",
+                    "괜찮으신가요? 한참 움직임이 없으셔서 걱정돼요. "
+                    "괜찮으시다면 몸을 움직이거나 소리를 내어 알려 주세요.",
+                )),
                 presence=context.presence,
                 suppression=context.suppression,     # SAFETY 는 억제를 뚫는다
                 comply_check="movement",
@@ -798,6 +818,7 @@ class ScenarioRunner:
             scenario="MEDICATION_PROMPT",
             title=str(self._notify_value("MEDICATION_PROMPT", "title", "복약")),
             text=self._medication_text(med),
+            speech=f"{med.name} 드실 시간이에요. 물과 함께 천천히 드세요.",
             priority=str(self._notify_value("MEDICATION_PROMPT", "priority", "normal")),
             presence=getattr(context, "presence", None),
             suppression=getattr(context, "suppression", None),
@@ -810,7 +831,7 @@ class ScenarioRunner:
         self._med_fired.add((med.id, key, today))
 
     def _medication_text(self, med: Any) -> str:
-        return f"{med.name} 드실 시간입니다"
+        return f"{_fit(med.name)}\n드실 시간이에요"
 
     def _roll_medication_day(self, today: str) -> None:
         """날이 바뀌면 어제 기록을 버린다."""
@@ -857,6 +878,7 @@ class ScenarioRunner:
             scenario="REFILL_PROMPT",
             title=str(self._notify_value("REFILL_PROMPT", "title", "처방 안내")),
             text=self._refill_text(due),
+            speech=self._refill_speech(due),
             priority=str(self._notify_value("REFILL_PROMPT", "priority", "normal")),
             presence=getattr(context, "presence", None),
             suppression=getattr(context, "suppression", None),
@@ -874,8 +896,16 @@ class ScenarioRunner:
         return (date.fromisoformat(med.end_date) - date.fromisoformat(today)).days
 
     def _refill_text(self, due: list) -> str:
+        # 이름을 다 늘어놓으면 한 줄을 넘는다. 첫 약만 말하고 나머지는 개수로.
+        first = _fit(due[0].name)
+        if len(due) > 1:
+            first = f"{_fit(due[0].name, 4)} 외 {len(due) - 1}"
+        return f"{first}\n처방이\n곧 끝나요"
+
+    def _refill_speech(self, due: list) -> str:
         names = ", ".join(m.name for m in due)
-        return f"{names} 처방이 곧 끝납니다"
+        return (f"{names} 처방이 곧 끝나요. "
+                "병원이나 약국에 들러 다시 처방받으실 때가 됐어요.")
 
     def _refill_cfg(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "refill", key, default=default)
@@ -1026,6 +1056,7 @@ class ScenarioRunner:
             scenario="HYDRATION_PROMPT",
             title=str(self._notify_value("HYDRATION_PROMPT", "title", "수분 섭취")),
             text=self._hydration_text(reason),
+            speech=self._hydration_speech(reason),
             priority=str(self._notify_value("HYDRATION_PROMPT", "priority", "normal")),
             presence=getattr(context, "presence", None),
             suppression=getattr(context, "suppression", None),
@@ -1053,14 +1084,26 @@ class ScenarioRunner:
         잡히지 않는다. 그래서 단정하지 않는다.
         """
         default = {
-            "LONG_GAP": "물 한 잔 드세요",
-            "SLEEP_END": "일어나셨네요, 물 한 잔 드세요",
-            "HEAT_ONSET": "더운 날이에요, 물 한 잔 드세요",
-            "DRY_ONSET": "공기가 건조해요, 물 한 잔 드세요",
-            "DAILY_SHORT": "오늘 물을 조금 더 드시면 좋겠습니다",
-            "RETURNED_HOME": "외출하셨네요, 물 한 잔 드세요",
+            "LONG_GAP": "물 한 잔\n드세요",
+            "SLEEP_END": "일어나셨네요\n물 한 잔\n드세요",
+            "HEAT_ONSET": "더운 날이에요\n물 한 잔\n드세요",
+            "DRY_ONSET": "공기가 건조해요\n물 한 잔\n드세요",
+            "DAILY_SHORT": "오늘 물을\n조금 더\n드셔 보세요",
+            "RETURNED_HOME": "외출하셨네요\n물 한 잔\n드세요",
         }[reason]
         return str(self._notify_value("HYDRATION_PROMPT", f"text_{reason}", default))
+
+    def _hydration_speech(self, reason: str) -> str:
+        """음성은 길어도 된다. 이유를 말하고 부드럽게 권한다."""
+        default = {
+            "LONG_GAP": "물 드신 지 꽤 되었어요. 물 한 잔 드시고 잠시 쉬어 가세요.",
+            "SLEEP_END": "푹 주무셨나요? 일어나셨으니 물 한 잔 드시면 몸이 한결 개운해져요.",
+            "HEAT_ONSET": "오늘은 날씨가 많이 덥네요. 땀으로 수분이 빠지니 물 한 잔 천천히 드세요.",
+            "DRY_ONSET": "실내 공기가 건조해요. 목이 마르지 않아도 물 한 잔 드시면 좋아요.",
+            "DAILY_SHORT": "오늘은 물을 조금 적게 드셨어요. 자기 전에 물 한 잔 더 드시면 좋겠어요.",
+            "RETURNED_HOME": "밖에 다녀오셨네요, 수고하셨어요. 물 한 잔 드시고 좀 쉬세요.",
+        }[reason]
+        return str(self._notify_value("HYDRATION_PROMPT", f"speech_{reason}", default))
 
     def _track_away(self, context: Any, now: float) -> None:
         """AWAY -> HOME 전이. 2시간 넘게 나갔다 온 경우만 센다.
@@ -1194,6 +1237,7 @@ class ScenarioRunner:
             scenario="MEAL_PROMPT",
             title=str(self._notify_value("MEAL_PROMPT", "title", "식사")),
             text=self._meal_text(peak, day_key(now)),
+            speech=self._meal_speech(peak, day_key(now)),
             priority=str(self._notify_value("MEAL_PROMPT", "priority", "normal")),
             presence=getattr(context, "presence", None),
             suppression=getattr(context, "suppression", None),
@@ -1208,15 +1252,26 @@ class ScenarioRunner:
     def _meal_text(self, peak: MealPeak, today: str) -> str:
         """어느 끼니인지는 시각으로 말한다.
 
-           그 끼니에 걸린 식후 약이 있으면 함께 알린다.
+           그 끼니에 걸린 식후 약이 있으면 함께 알린다. 화면이 좁아 약 이름은
+           싣지 않는다 — 어떤 약인지는 앱에서 보고, 여기서는 챙기라고만 한다.
         """
         h, m = divmod(peak.center, 60)
-        base = f"{h}시{m:02d}분쯤 드시던 식사, 아직이신가요"
+        base = f"{h}시{m:02d}분쯤\n식사하셨나요?"
 
+        if self._after_meal_meds_for(peak, today):
+            return f"{base}\n약도 챙기세요"
+        return base
+
+    def _meal_speech(self, peak: MealPeak, today: str) -> str:
+        """음성에는 약 이름까지 말한다."""
+        h, m = divmod(peak.center, 60)
+        at = f"{h}시" if m == 0 else f"{h}시 {m}분"
+        base = (f"보통 {at}쯤 식사를 하시는데, 아직 식사 전이신가요? "
+                "끼니를 거르지 말고 챙겨 드세요.")
         meds = self._after_meal_meds_for(peak, today)
         if meds:
-            names = ", ".join(m.name for m in meds)
-            return f"{base} 드시고 나서 {names}도 잊지 마세요"
+            names = ", ".join(x.name for x in meds)
+            return f"{base} 식사 후에는 {names}도 잊지 말고 드세요."
         return base
 
     def _after_meal_meds_for(self, peak: MealPeak, today: str) -> list:
