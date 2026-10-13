@@ -343,4 +343,110 @@ std::string buildNotifyAck(const char* src_id, uint32_t seq, uint32_t sent_ts,
     return out;
 }
 
+std::string deviceCmdTopic(const char* virtual_id) {
+    return std::string("hestia/device/") + virtual_id + "/cmd";
+}
+
+bool parseDeviceCmdTopic(const char* topic, char* out, size_t out_size) {
+    static const char PREFIX[] = "hestia/device/";
+    static const char SUFFIX[] = "/cmd";
+    const size_t PRE_LEN = sizeof(PREFIX) - 1;
+    const size_t SUF_LEN = sizeof(SUFFIX) - 1;
+
+    if (topic == nullptr || out == nullptr || out_size == 0) return false;
+    if (strncmp(topic, PREFIX, PRE_LEN) != 0) return false;
+
+    size_t len = strlen(topic);
+    if (len < PRE_LEN + SUF_LEN + 1) return false;          // vid 가 비었다
+    if (strcmp(topic + len - SUF_LEN, SUFFIX) != 0) return false;
+
+    size_t vid_len = len - PRE_LEN - SUF_LEN;
+    if (vid_len >= out_size) return false;
+
+    // vid 안에 '/' 가 있으면 토픽 레벨이 더 깊다는 뜻
+    for (size_t i = 0; i < vid_len; i++) {
+        if (topic[PRE_LEN + i] == '/') return false;
+    }
+
+    memcpy(out, topic + PRE_LEN, vid_len);
+    out[vid_len] = '\0';
+    return true;
+}
+
+static void copyStr(char* dst, size_t size, const char* src) {
+    if (src == nullptr) { dst[0] = '\0'; return; }
+    strncpy(dst, src, size - 1);
+    dst[size - 1] = '\0';
+}
+
+DeviceCmd parseDeviceCmd(const JsonDocument& doc) {
+    DeviceCmd c;
+    memset(&c, 0, sizeof(c));
+
+    const char* cmd_id = doc["cmd_id"]      | "";
+    const char* dtype  = doc["device_type"] | "";
+    const char* action = doc["action"]      | "";
+
+    if (cmd_id[0] == '\0' || dtype[0] == '\0' || action[0] == '\0') {
+        return c;                                   // valid = false
+    }
+
+    copyStr(c.cmd_id,      sizeof(c.cmd_id),      cmd_id);
+    copyStr(c.device_type, sizeof(c.device_type), dtype);
+    copyStr(c.action,      sizeof(c.action),      action);
+
+    JsonVariantConst p = doc["params"];
+    if (p.is<JsonObjectConst>()) {
+        JsonVariantConst pw = p["power"];
+        if (pw.is<const char*>()) {
+            const char* s = pw.as<const char*>();
+            if (s != nullptr && s[0] != '\0') {
+                c.light.has_power = true;
+                copyStr(c.light.power, sizeof(c.light.power), s);
+            }
+        }
+
+        JsonVariantConst br = p["brightness"];
+        if (br.is<int>()) {
+            int v = br.as<int>();
+            if (v < 0)   v = 0;
+            if (v > 100) v = 100;
+            c.light.has_brightness = true;
+            c.light.brightness     = (uint8_t)v;
+        }
+
+        JsonVariantConst ct = p["color_temp"];
+        if (ct.is<int>()) {
+            int v = ct.as<int>();
+            if (v < 0)     v = 0;
+            if (v > 65535) v = 65535;
+            c.light.has_color_temp = true;
+            c.light.color_temp     = (uint16_t)v;
+        }
+    }
+
+    c.valid = true;
+    return c;
+}
+
+std::string buildSmartLightState(const char* src_id, uint32_t seq,
+                                 uint32_t sent_ts,
+                                 const char* power,
+                                 bool has_brightness, uint8_t brightness,
+                                 bool has_color_temp, uint16_t color_temp) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+
+    doc["device_type"] = "smart_light";
+    doc["source"]      = "esp32";
+    doc["power"]       = power;
+
+    if (has_brightness) doc["brightness"] = brightness;
+    if (has_color_temp) doc["color_temp"] = color_temp;
+
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
 }  // namespace hestia
