@@ -25,7 +25,7 @@ from datetime import datetime
 from .clock import Clock
 from .config import Config
 from .notify import Notifier
-from .world import PresenceState, BedState, ClimateState, WorldState
+from .world import PresenceState, BedState, ClimateState, LightState, WorldState
 from .policy import Decision, InterventionPolicy
 from .fsm import T0Entry
 from .model import MealPeak, peak_tail
@@ -127,6 +127,10 @@ class ScenarioRunner:
         # 조명
         self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
 
+        self._dl: tuple[str, int] | None = None   # (vid, 바닥 밝기)
+        self._dl_at: float | None = None          # 마지막 조정
+        self._dl_hold: float | None = None        # 사용자 개입 유예 끝
+
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
@@ -136,6 +140,7 @@ class ScenarioRunner:
         timers += self._safety(context)
         timers += self._sleep_routine(context)
         timers += self._night_light(context)
+        timers += self._day_light(context)
         timers += self._meal_prompt(context)
         timers += self._medication_prompt(context)
         timers += self._refill_prompt(context)
@@ -953,6 +958,104 @@ class ScenarioRunner:
 
     def _nl_value(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "night_light", key, default=default)
+
+
+    # ------------------------------------------------------------ DAY_LIGHT
+
+    def _day_light(self, context: Any) -> list[tuple[str, float]]:
+        """낮에 너무 어두우면 조명을 올린다.
+
+        '적정 밝기 유지' 가 아니라 '하한 보장' 이다. 시스템이 더한 몫만
+        되돌리고 사용자가 맞춘 밝기 아래로는 내리지 않는다.
+        """
+        now = self._clock.now()
+
+        hour = datetime.fromtimestamp(now, KST).hour
+        if not (
+            int(self._dl_value("day_start_hour", 8))
+            <= hour
+            < int(self._dl_value("day_end_hour", 18))
+        ):
+            # 저녁부터는 손대지 않는다. 어두워지면 사람이 직접 켜고,
+            # 그 시간대에 조명을 올리는 것은 수면에 나쁘다.
+            self._dl = None            # 다음 날 바닥을 다시 잡는다
+            return []
+
+        if self._dl_hold is not None and now < self._dl_hold:
+            return [("day-light", self._dl_hold)]
+
+        found = self._lux_area()
+        if found is None:
+            return []                  # 조도 센서가 없다
+        area, lux = found
+
+        presence = getattr(context, "presence", None)
+        if presence is None or not presence.areas.get(area):
+            return []                  # 아무도 없는 방을 밝힐 이유가 없다
+
+        lights = self._controller.devices_of_type("smart_light", area)
+        if not lights:
+            return []
+        vid = lights[0]
+
+        # 다른 시나리오가 쥐고 있거나 사용자가 손댔다
+        cmd = self._controller.last_for(vid)
+        if cmd is not None and cmd.reason != "DAY_LIGHT":
+            self._dl = None
+            return []
+        if self._controller.reverted(vid):
+            self._dl = None
+            self._dl_hold = now + float(self._dl_value("manual_override_sec", 7200))
+            return [("day-light", self._dl_hold)]
+
+        gap = float(self._dl_value("min_adjust_interval_sec", 60))
+        if self._dl_at is not None and now - self._dl_at < gap:
+            return [("day-light", self._dl_at + gap)]
+
+        cur = self._brightness_of(vid)
+        if cur is None:
+            return []                  # 조명 상태를 모른다
+
+        # 바닥은 처음 손대는 시점의 밝기다. 사용자가 맞춘 값이므로
+        # 그 아래로는 내리지 않는다.
+        if self._dl is None or self._dl[0] != vid:
+            self._dl = (vid, cur)
+        floor_level = self._dl[1]
+
+        step = int(self._dl_value("step", 10))
+        want = cur
+        if lux < float(self._dl_value("floor_lux", 300)):
+            want = min(100, cur + step)
+        elif lux > float(self._dl_value("ceiling_lux", 600)):
+            want = max(floor_level, cur - step)
+
+        if want == cur:
+            return [("day-light", now + gap)]
+
+        self._controller.set(
+            vid, power="ON", brightness=want, reason="DAY_LIGHT", priority="low",
+        )
+        self._dl_at = now
+        log.info("주간 조명 %s %s → %s%% (lux=%s)", vid, cur, want, round(lux))
+        return [("day-light", now + gap)]
+
+    def _lux_area(self) -> tuple[str, float] | None:
+        """조도 센서가 있는 구역과 그 값."""
+        for area in self._config.areas:
+            for s in self._world.sensors_of(area):
+                if isinstance(s, LightState):
+                    return area, s.lux
+        return None
+
+    def _brightness_of(self, vid: str) -> int | None:
+        st = self._world.device(vid)
+        if st is None or st.get("power") != "ON":
+            return 0 if st is not None else None
+        b = st.get("brightness")
+        return int(b) if b is not None else None
+
+    def _dl_value(self, key: str, default: Any) -> Any:
+        return self._config.value("scenarios", "day_light", key, default=default)
 
 
     # ------------------------------------------------------------ 판정 발행
