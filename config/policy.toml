@@ -436,6 +436,10 @@ notice_days = 3
 hour = 9
 retry_sec = 1800
 
+[scenarios.night_light]
+brightness = 15          # 0~100 정수
+timeout_sec = 1800
+
 
 # ============================================================ 안전
 #

@@ -695,3 +695,109 @@ def test_awake_areas_empty_when_stayed(c):
     c.sched.run_due()
 
     assert c.sleeps("sleep_start")[1].awake_areas == ()
+
+
+# ============================================================ 야간 조명
+
+NL_TIMEOUT = 1800        # scenarios.night_light.timeout_sec
+LEFT = NIGHT + STILL_LIMIT + 300
+
+
+def asleep_in_living(c: Ctx):
+    """TV 배너로 수면 확정. 조명(vd-02)은 프로브가 건드리지 않는다."""
+    c.device("vd-01", "smart_tv", power="ON")
+    c.light("vd-02", power="OFF", brightness=0)
+    c.bed("vs-02", occupied=True)
+    c.presence("vs-01", energy=3)
+    c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
+    c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
+    c.sched.run_due()
+    return c
+
+
+def nl(c: Ctx) -> tuple[dict, ...]:
+    return tuple(p for p in c.cmds() if p.get("reason") == "NIGHT_LIGHT")
+
+
+def test_night_light_on_when_bed_left(c):
+    """패드가 비면 그 구역 조명을 약하게 켠다."""
+    asleep_in_living(c)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+
+    assert len(nl(c)) == 1
+    assert nl(c)[-1]["params"] == {"power": "ON", "brightness": 15}
+
+
+def test_no_night_light_when_woke_by_movement(c):
+    """움직임 지속으로 깬 것은 60초 늦다 — 이미 걸어간 뒤다."""
+    asleep_in_living(c)
+    woke = NIGHT + STILL_LIMIT + 200
+    c.at(woke).presence("vs-01", energy=50, seq=3)
+    c.at(woke + SUSTAIN + 5).presence("vs-01", energy=50, seq=4)
+
+    assert c.runner.asleep is None          # 깼다
+    assert nl(c) == ()                      # 패드는 아직 눌려 있다
+
+
+def test_no_night_light_when_already_on(c):
+    """사용자나 프로브가 쥐고 있는 조명은 건드리지 않는다."""
+    asleep_in_living(c)
+    c.light("vd-02", power="ON", brightness=80, seq=2)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+
+    assert nl(c) == ()
+
+
+def test_night_light_releases_when_probe_takes_light(c):
+    """프로브가 같은 조명을 잡으면 소등도 그쪽이 한다."""
+    asleep_in_living(c)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+    assert c.runner._nl is not None
+
+    c.engine.controller.set("vd-02", brightness=70, reason="SLEEP_ROUTINE")
+    c.engine.scenarios.tick(c.engine.context)
+
+    assert c.runner._nl is None
+    assert len(nl(c)) == 1                  # 끄는 명령은 안 냈다
+
+
+def test_night_light_releases_when_user_turns_off(c):
+    """사용자가 끄면 손을 뗀다."""
+    asleep_in_living(c)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+    assert c.runner._nl is not None
+
+    c.at(LEFT + 60).light("vd-02", power="OFF", brightness=0, seq=3)
+    c.engine.scenarios.tick(c.engine.context)
+
+    assert c.runner._nl is None
+    assert len(nl(c)) == 1
+
+
+def test_night_light_off_after_timeout_when_area_empty(c):
+    """안 돌아왔고 그 방도 비었다 — 아무도 없는 방을 밝힐 이유가 없다."""
+    asleep_in_living(c)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+    c.at(LEFT + 60).presence("vs-01", present=False, seq=3)
+
+    c.at(LEFT + NL_TIMEOUT + 10)
+    c.sched.run_due()
+
+    assert nl(c)[-1]["params"]["power"] == "OFF"
+    assert c.runner._nl is None
+
+
+def test_night_light_stays_when_still_there(c):
+    """그 구역에 사람이 있으면 끄지 않는다 — 낙상일 수 있다.
+
+    쓰러진 사람 옆에서 불을 끄는 쪽이 더 나쁘다.
+    """
+    asleep_in_living(c)
+    c.at(LEFT).bed("vs-02", occupied=False, seq=2)
+    # 움직이는 중이라 프로브가 조명을 가져가지 않는다
+    c.at(LEFT + 600).presence("vs-01", energy=50, seq=3)
+    c.at(LEFT + NL_TIMEOUT + 10).presence("vs-01", energy=50, seq=4)
+    c.sched.run_due()
+
+    assert nl(c)[-1]["params"]["power"] == "ON"
+    assert c.runner._nl is not None
