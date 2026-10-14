@@ -11,6 +11,10 @@ cmd 를 받을 수 없어서, 제어가 먹혔는지 확인할 방법이 없다.
 엔진이 내보내는 것(context, 알림, 판정, t0 로그)도 함께 구독해 찍는다 —
 쏘기만 하고 결과를 못 보면 터미널 두 개를 번갈아 봐야 한다.
 
+재실은 배타적이다. 사람은 한 명이고 한 곳에만 있으므로, 어느 구역을
+켜면 나머지 구역을 비운다 — 실제 mmWave 도 사람이 나가면 스스로
+present=false 를 올린다. 두 명을 만들어 보려면 'presence <area> keep'.
+
 점진 변화는 중간값을 보내지 않는다 — transition_ms 만큼 기다렸다가
 최종값 하나만 발행한다. 실제 기기도 대개 그렇고, 중간값이 오면
 엔진의 되돌림 판정이 그것을 사용자 조작으로 오인한다.
@@ -580,24 +584,65 @@ class Simulator:
 
     # ------------------------------------------------------------ 센서 명령
 
-    def _presence(self, args: list[str], *, energy: int) -> None:
-        if not args:
-            print("사용법: presence <area> [off]")
-            return
-        area = args[0]
+    def _presence_at(
+        self,
+        area: str,
+        *,
+        energy: int,
+        present: bool = True,
+        distance_cm: int = 150,
+        exclusive: bool = True,
+    ) -> str | None:
+        """그 구역에 사람이 있다고 보낸다. 나머지 구역은 비운다.
+
+        사람은 한 명이고 한 곳에만 있다. 다른 구역을 비우지 않으면 엔진이
+        두 명으로 센다 — 실제 mmWave 도 사람이 나가면 스스로 present=false
+        를 올리므로, 비우는 쪽이 하드웨어와 같다.
+
+        exclusive=False 면 그 구역만 건드린다 (2인 상황 테스트).
+        """
         vid = self._sensor_in(area, "presence")
         if vid is None:
             print(f"{area} 에 presence 센서가 없음")
-            return
-        present = len(args) < 2 or args[1] != "off"
+            return None
+
+        if present and exclusive:
+            for other in self._config.areas:
+                if other == area:
+                    continue
+                ovid = self._sensor_in(other, "presence")
+                if ovid is not None:
+                    self._publish_sensor(
+                        ovid, present=False, confidence="high",
+                        energy=0, distance_cm=0,
+                    )
+
         self._publish_sensor(
             vid,
             present=present,
             confidence="high",
             energy=energy if present else 0,
-            distance_cm=150 if present else 0,
+            distance_cm=distance_cm if present else 0,
         )
-        print(f"  {vid} present={present} energy={energy if present else 0}")
+        return vid
+
+    def _presence(self, args: list[str], *, energy: int) -> None:
+        """presence <area> [off|keep] — keep 면 다른 구역을 비우지 않는다 (2인 테스트)."""
+        if not args:
+            print("사용법: presence <area> [off|keep]")
+            return
+        area = args[0]
+        flags = [a.lower() for a in args[1:]]
+        present = "off" not in flags
+        keep = "keep" in flags
+
+        vid = self._presence_at(
+            area, energy=energy, present=present, exclusive=not keep
+        )
+        if vid is None:
+            return
+        note = "  (다른 구역 유지)" if keep else ""
+        print(f"  {vid} present={present} energy={energy if present else 0}{note}")
 
     def _motion(self, args: list[str]) -> None:
         """motion <area> [off] — PIR. presence 와 다른 경로를 탄다."""
@@ -806,17 +851,46 @@ class Simulator:
         )
 
     def _weather(self, args: list[str]) -> None:
-        """weather [on|off] — 폭염 특보. 엔진이 아직 구독하지 않는다."""
-        on = not args or args[0] != "off"
+        """weather [on|off|dry] — 특보를 쏜다.
+
+        on   폭염 특보 → HEAT_ADVISORY 로 수분 알림
+        dry  건조 특보
+        off  특보 해제 (관측값만)
+
+        observed_at 을 지금으로 넣는 것이 중요하다 — 엔진이
+        age_sec <= weather.max_age_sec 를 보고 오래된 값을 버린다.
+        """
+        what = args[0].lower() if args else "on"
+        now = int(time.time())
+
+        if what == "dry":
+            warnings = [{"name": "건조주의보", "type": "DRY", "level": "ADVISORY"}]
+            temp, hum = 18.0, 22.0
+        elif what == "off":
+            warnings = []
+            temp, hum = 22.0, 48.0
+        else:
+            warnings = [{"name": "폭염주의보", "type": "HEAT", "level": "ADVISORY"}]
+            temp, hum = 33.1, 62.0
+
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": now,
             "src_id": "rpi4",
-            "heat_advisory": on,
-            "temperature_c": 33.1 if on else 22.0,
+            "source": "kma",
+            "observed_at": now,
+            "temperature_c": temp,
+            "humidity_pct": hum,
+            "precip_1h_mm": 0.0,
+            "precip_type": "NONE",
+            "wind_speed_ms": 1.4,
+            "warnings": warnings,
+            "warnings_issued_at": now,
         }
+        # 1시간 주기 관측값이므로 retained — 엔진이 재시작해도 현재 날씨를 안다
         self._publish_raw("hestia/external/weather", payload, retain=True)
-        print(f"  폭염 특보 {on} (엔진 미구독 — 발행만)")
+        label = ", ".join(w["type"] for w in warnings) or "특보 없음"
+        print(f"  날씨 {temp}°C {hum}% — {label}")
 
     def _ack(self, args: list[str]) -> None:
         """ack [SEEN|DELIVERED] — 마지막 알림에 응답한다."""
@@ -861,15 +935,8 @@ class Simulator:
 
     def _home(self) -> None:
         """집에 있는 상태로 되돌린다 — 거실 재실, 나머지 비움."""
-        for area in self._config.areas:
-            vid = self._sensor_in(area, "presence")
-            if vid is None:
-                continue
-            here = area == "living"
-            self._publish_sensor(
-                vid, present=here, confidence="high",
-                energy=45 if here else 0, distance_cm=150 if here else 0,
-            )
+        if self._presence_at("living", energy=45) is None:
+            return
         print("  거실 재실, 나머지 구역 비움")
 
     def _out(self) -> None:
@@ -942,11 +1009,10 @@ class Simulator:
             print("주방 presence 또는 인덕션 전력 센서가 없음")
             return
 
+        # 주방에 들어가면 나머지 구역은 비워진다 (_presence_at 이 한다).
+        # 그러지 않으면 거실이 true 로 남아 엔진이 두 명으로 센다.
         def pres(energy: int) -> Callable[[], None]:
-            return lambda: self._publish_sensor(
-                kitchen, present=True, confidence="high",
-                energy=energy, distance_cm=150,
-            )
+            return lambda: self._presence_at("kitchen", energy=energy)
 
         self._after(0, "주방 입장", pres(45))
         self._after(2, "인덕션 ON → COOKING", lambda: self._publish_sensor(
@@ -957,7 +1023,7 @@ class Simulator:
         self._after(26, "주방 체류 저에너지 → EATING", pres(5))
         self._after(50, "주방 이탈", lambda: self._publish_sensor(
             kitchen, present=False, confidence="high", energy=0, distance_cm=0))
-        self._after(52, "거실로", lambda: self._presence(["living"], energy=45))
+        self._after(52, "거실로", lambda: self._presence_at("living", energy=45))
         self._after(
             80,
             "묶음 종료 대기 — grace 20초 뒤 log/t0, 다시 1분 뒤 복약 알림",
@@ -981,19 +1047,18 @@ class Simulator:
         config-test 기준: probe_still 30초, no_channel 60초, timeout 10초.
         침실 조명을 켜두면 dim 프로브, 꺼두면 긴 정지만으로 확정한다.
         """
-        bedroom = self._sensor_in("bedroom", "presence")
-        pad = self._sensor_in("bedroom", "bed")
-        if bedroom is None:
+        if self._sensor_in("bedroom", "presence") is None:
             print("침실 presence 센서가 없음")
             return
+        pad = self._sensor_in("bedroom", "bed")
 
-        self._after(0, "거실 비움", lambda: self._presence(["living", "off"], energy=0))
-        self._after(1, "침실 입장", lambda: self._publish_sensor(
-            bedroom, present=True, confidence="high", energy=45, distance_cm=120))
+        # 입장이 나머지 구역을 비운다 — 따로 '거실 비움' 단계가 필요 없다
+        self._after(0, "침실 입장", lambda: self._presence_at(
+            "bedroom", energy=45, distance_cm=120))
         if pad:
             self._after(3, "침대 점유", lambda: self._publish_sensor(pad, occupied=True))
-        self._after(5, "정지 시작 (energy 바닥)", lambda: self._publish_sensor(
-            bedroom, present=True, confidence="high", energy=2, distance_cm=120))
+        self._after(5, "정지 시작 (energy 바닥)", lambda: self._presence_at(
+            "bedroom", energy=2, distance_cm=120))
         self._after(
             45,
             "프로브 발동 대기 — 조명이 켜져 있으면 dim, 아니면 60초 정지로 확정",
@@ -1038,15 +1103,13 @@ class Simulator:
 
         config-test 기준: still_sec 30초.
         """
-        bath = self._sensor_in("bathroom", "presence")
-        if bath is None:
+        if self._sensor_in("bathroom", "presence") is None:
             print("화장실 presence 센서가 없음")
             return
-        self._after(0, "거실 비움", lambda: self._presence(["living", "off"], energy=0))
-        self._after(1, "화장실 입장", lambda: self._publish_sensor(
-            bath, present=True, confidence="high", energy=45, distance_cm=100))
-        self._after(4, "정지 — energy 바닥", lambda: self._publish_sensor(
-            bath, present=True, confidence="high", energy=2, distance_cm=100))
+        self._after(0, "화장실 입장", lambda: self._presence_at(
+            "bathroom", energy=45, distance_cm=100))
+        self._after(3, "정지 — energy 바닥", lambda: self._presence_at(
+            "bathroom", energy=2, distance_cm=100))
         self._after(40, "30초 정지 — SAFETY 알림이 나와야 한다", lambda: None)
 
     # ------------------------------------------------------------ 출력
@@ -1073,6 +1136,8 @@ scenario <이름> — 단계를 시간 간격으로 자동 실행 (abort 로 취
   hydration  급수 → 간격 경과 → LONG_GAP 알림
   away       외출 → AWAY → 귀가 → RETURNED_HOME 알림
   safety     화장실 재실 → 정지 → 낙상 알림
+
+재실은 배타적이다 — 어느 구역에 들어가면 나머지는 비워진다.
 """
 
 HELP = """
@@ -1086,8 +1151,9 @@ HELP = """
   remote                   TV 리모컨 입력 이벤트
 
 센서
-  presence <area> [off]    재실 (energy 45)
-  still <area>             정지 (energy 3) — 낙상·수면 판정용
+  presence <area> [off|keep]  재실 (energy 45). 나머지 구역은 비워진다
+                                keep 를 주면 안 비운다 — 2인 상황 테스트용
+  still <area> [keep]      정지 (energy 3) — 낙상·수면 판정용
   motion <area> [off]      PIR
   bed [area] [off]         압력 패드
   door [open|close]        현관문
@@ -1100,7 +1166,7 @@ HELP = """
                              (기본) 지금이 봉우리 중심 → TIME_NORMAL
                              late   봉우리를 지남 → 식사 알림
   med [clear]              복약 등록 (감기약 식후 1분 / 혈압약 2분 뒤)
-  weather [on|off]         폭염 특보 (엔진 미구독)
+  weather [on|off|dry]     특보. on=폭염 → HEAT_ADVISORY 수분 알림
   profile [REAL|DEMO]      프로파일 전환
   ack [SEEN|DELIVERED]     마지막 알림에 응답
 
