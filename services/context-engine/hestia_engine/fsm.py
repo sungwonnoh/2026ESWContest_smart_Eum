@@ -79,21 +79,33 @@ class MemoryT0Log:
 class FileT0Log:
     """JSONL append. RPi5 는 /data 만 쓸 수 있다.
 
-    나중에 hestia/log/t0 발행을 붙이면 RPi4 가 hestia/# 전량 적재로
-    자동 수집한다. 그때도 이 파일은 백업으로 남는다.
+    on_write 가 있으면 발행까지 간다 — RPi4 가 hestia/# 전량 적재로
+    수집한다. 파일은 그래도 남는다: 브로커가 죽어 있는 동안의 기록이
+    끊기면 안 되고, 재시작 시 오늘 기록 복원은 of_date() 가 파일을 읽는다.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, on_write: Callable[[dict], None] | None = None) -> None:
         self._path = path
+        self._on_write = on_write
 
     def write(self, entry: T0Entry) -> None:
+        payload = asdict(entry)
+
+        # 파일이 먼저다. 발행이 실패해도 기록은 남아야 한다.
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a", encoding="utf-8") as fp:
-                fp.write(json.dumps(asdict(entry), ensure_ascii=False) + "\n")
+                fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except OSError as exc:
-            # 로그 실패가 엔진을 멈추게 해서는 안 된다
             log.warning("t0 로그 기록 실패: %s", exc)
+
+        if self._on_write is None:
+            return
+        try:
+            self._on_write(payload)
+        except Exception as exc:
+            # 발행 실패가 엔진을 멈추게 해서는 안 된다
+            log.warning("t0 발행 실패: %s", exc)
 
     def of_date(self, date: str, *, tail: int = 200) -> tuple[T0Entry, ...]:
         """그 날짜의 기록. 재시작 시 오늘 루틴을 복원하는 데 쓴다.

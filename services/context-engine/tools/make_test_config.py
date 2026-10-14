@@ -26,12 +26,18 @@ REPLACEMENTS: list[tuple[str, str, str]] = [
     ("cooldown_sec", "1800", "30"),
     ("ack_deadline_sec", "600", "20"),
     ("expiry_sec", "3600", "300"),
+    ("comply_window_min", "60", "2"),
+    ("comply_window_min", "30", "1"),
+    ("comply_window_min", "10", "1"),
 
     # --- 식사 묶음
     ("close_grace_sec", "600", "20"),
     ("min_duration_sec", "120", "15"),
     ("session_timeout_sec", "7200", "600"),
     ("cooking_lookback_sec", "7200", "600"),
+    ("eating_min_dwell_sec", "300", "20"),
+    ("prep_to_eating_gap_sec", "180", "5"),
+    ("fridge_recent_window_sec", "900", "60"),
 
     # --- 수면 프로브
     ("probe_still_sec", "900", "30"),

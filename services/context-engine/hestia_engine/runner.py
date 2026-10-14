@@ -77,9 +77,22 @@ class Runner:
         self.sched = Scheduler(self.clock)
         self.world = WorldState(self.clock, config, self.sched)
 
-        t0log = FileT0Log((data_dir or Path("/data/hestia")) / "t0_log.jsonl")
         self.client = self._make_client()
         self.publisher = MqttPublisher(self.client)
+
+        t0log = FileT0Log(
+            (data_dir or Path("/data/hestia")) / "t0_log.jsonl",
+            on_write=lambda d: self.publisher.publish(
+                "hestia/log/t0",
+                {
+                    "version": SCHEMA_VERSION,
+                    "sent_ts": int(self.clock.now()),
+                    "src_id": NODE_ID,
+                    **d,
+                },
+                retain=False,
+            ),
+        )
         self.engine = Engine(
             self.clock, config, self.world, self.sched, self.publisher, t0log
         )
