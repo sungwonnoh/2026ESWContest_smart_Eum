@@ -119,7 +119,7 @@ class ActivityEvaluator:
             scores[prev.state] += bonus
             factors["hysteresis_on"] = prev.state
 
-        state, confidence = self._pick(scores, factors)
+        state, confidence = self._pick(scores, factors, prev.state if prev else None)
 
         # 최소 지속 — 바꾼 지 얼마 안 됐으면 유지한다.
         # 단 UNKNOWN 에서 벗어나는 것은 막지 않는다. UNKNOWN 은 상태가 아니라
@@ -152,7 +152,7 @@ class ActivityEvaluator:
 
         # ---- 수면·기상
         bed = self._bed_in("bedroom")
-        if bed is not None and bed.occupied:
+        if presence.areas.get("bedroom") and bed is not None and bed.occupied:
             still_sec = self._world.still_sec("bedroom")
             still_need = float(self._config.value(
                 "activity", "sleep", "still_for_sleep_sec", default=600
@@ -279,16 +279,26 @@ class ActivityEvaluator:
 
     # ------------------------------------------------------------ 선택
 
-    def _pick(self, scores: dict[str, float], factors: dict[str, Any]) -> tuple[str, float]:
+    def _pick(
+        self,
+        scores: dict[str, float],
+        factors: dict[str, Any],
+        prev: str | None = None,
+    ) -> tuple[str, float]:
         """최댓값을 고르되 임계 미달이면 UNKNOWN.
 
         confidence 는 전체 합 대비 비율이다. 후보가 10개나 되므로
         2등만 보는 것보다 전체 분포를 보는 쪽이 맞다.
+
+        동점이면 직전 상태가 이긴다. 그러지 않으면 hysteresis_bonus 가
+        적어둔 값보다 미세하게 작게 동작한다 — 도전자가 가산점만큼
+        정확히 앞선 경우가 바로 동점이고, 거기서 도전자가 이기면
+        가산점은 0.1 이 아니라 0.0999… 다.
         """
         if not scores:
             return "UNKNOWN", 0.0
 
-        state, top = max(scores.items(), key=lambda kv: kv[1])
+        state, top = max(scores.items(), key=lambda kv: (kv[1], kv[0] == prev))
         min_score = float(self._config.value("activity", "min_score", default=0.35))
         factors["top_score"] = round(top, 3)
 
@@ -362,7 +372,12 @@ class ActivityEvaluator:
 
         best: float | None = None
         for st in self._world.sensors_by_role(role):
-            if isinstance(st, PowerState) and st.state != "ON" and st.changed_at > 0.0:
+            if (
+                isinstance(st, PowerState)
+                and st.state != "ON"
+                and st.on_since is not None     # 켠 적이 있어야 '꺼진 뒤'가 성립한다
+                and st.changed_at > 0.0
+            ):
                 gap = now - st.changed_at
                 best = gap if best is None else min(best, gap)
         return best
@@ -371,12 +386,11 @@ class ActivityEvaluator:
         return any(self._low_energy(a) for a in areas)
 
     def _low_energy(self, area: str) -> bool:
-        still_max = float(self._config.value("presence", "energy", "still_max", default=10))
         active_min = float(self._config.value("presence", "energy", "active_min", default=30))
-        for st in self._world.sensors_of(area):
-            if isinstance(st, PresenceState) and st.present:
-                return st.energy < active_min
-        return False
+        return any(
+            isinstance(st, PresenceState) and st.present and st.energy < active_min
+            for st in self._world.sensors_of(area)
+        )
 
 
     def _tv(self):

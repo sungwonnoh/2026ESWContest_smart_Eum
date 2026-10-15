@@ -4,15 +4,17 @@
     python monitor.py --host 172.20.10.3 --view input
     python monitor.py --host 172.20.10.3 --view board --config ../../config/homes/demo.toml
 
-창 여섯:
+창 일곱:
     input     엔진이 받는 센서·가전 상태
     activity  엔진이 추론한 사용자 활동
     decision  재실·부재·인원·억제·모델
     action    판정과 개입 (알림·발화·응답·기기 명령)
     board     현재 상태 한 화면 (덮어쓰기)
     t0        학습 원재료 기록
+    display   기기 화면 대역 — 지금 띄워진 알림 하나 (덮어쓰기)
 
-여섯을 한 화면에 띄우려면 demo-open.sh (창 여섯 개) 또는 demo-screen.sh (tmux).
+한 번에 띄우려면 demo-open.sh (macOS·WSL), demo-open.ps1 (Windows),
+demo-screen.sh (tmux).
 
 모르는 필드는 번역하지 않고 키=값 그대로 찍는다. 화면에 안 보이는 것보다
 덜 다듬어져 보이는 게 낫다.
@@ -61,6 +63,13 @@ DEVICE_KO = {
 # policy 의 [power.*] 키 → 사람이 읽는 이름
 PROFILE_KO = dict(DEVICE_KO)
 
+# proxy_for — 어느 기기 자리를 대신 맡았나. 기기 이름보다 '어디에 뜨는지'다
+PROXY_KO = {
+    "smart_fridge": "냉장고 보드", "smart_tv": "TV 배너",
+    "smart_light": "조명", "display_node": "디스플레이",
+    "speaker": "스피커",
+}
+
 # activity.py 의 ACTIVITY_STATES 열 개 전부
 ACTIVITY_KO = {
     "SLEEPING": "수면", "IN_BED_AWAKE": "침대 각성", "IN_SOFA_AWAKE": "소파 각성",
@@ -87,6 +96,34 @@ def pad(s: Any, width: int) -> str:
     """왼쪽 정렬. f-string 의 :<N 은 한글에서 어긋난다."""
     s = str(s)
     return s + " " * max(0, width - cols(s))
+
+
+def middle(s: Any, width: int) -> str:
+    """가운데 정렬. 한글 폭으로 잰다."""
+    s = str(s)
+    gap = max(0, width - cols(s))
+    left = gap // 2
+    return " " * left + s + " " * (gap - left)
+
+
+def fold(text: str, width: int) -> list[str]:
+    """한글 폭 기준으로 줄바꿈. 빈 줄은 유지한다."""
+    out: list[str] = []
+    for para in str(text).split("\n"):
+        words = para.split()
+        if not words:
+            out.append("")
+            continue
+        cur = ""
+        for w in words:
+            cand = w if not cur else f"{cur} {w}"
+            if cols(cand) > width and cur:
+                out.append(cur)
+                cur = w
+            else:
+                cur = cand
+        out.append(cur)
+    return out
 
 
 def area(name: Any) -> str:
@@ -262,6 +299,7 @@ class View:
 
     title = ""
     width = 78
+    live = False          # True 면 로그가 아니라 한 화면을 계속 갈아끼운다
 
     def __init__(self, inv: Inventory) -> None:
         self.inv = inv
@@ -716,6 +754,7 @@ class BoardView(View):
     """로그가 아니다. 한 화면을 계속 갈아끼운다."""
 
     title = "현재 상태"
+    live = True
     W = 42
 
     def __init__(self, inv: Inventory) -> None:
@@ -728,6 +767,8 @@ class BoardView(View):
         self.nodes: dict[str, dict] = {}
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
+        self.meds: list[dict] = []         # registry/medications — 등록된 약
+        self.med_push = 0                  # 오늘 복약 알림 발송 횟수
         self.day = time.strftime("%Y-%m-%d")
 
     def topics(self) -> list[str]:
@@ -736,7 +777,9 @@ class BoardView(View):
                 "hestia/context/suppression", "hestia/context/day",
                 "hestia/log/t0",
                 "hestia/node/+/announce", "hestia/node/+/status",
-                "hestia/registry/devices"]
+                "hestia/registry/devices",
+                "hestia/registry/medications",
+                "hestia/notify/push"]
 
     def handle(self, topic: str, p: dict) -> list[str]:
         match topic.split("/")[1:]:
@@ -767,6 +810,13 @@ class BoardView(View):
                 n["ts_synced"] = bool(p.get("ts_synced"))
             case ["registry", "devices"]:
                 self.inv.apply_registry(p.get("devices", []))
+            case ["registry", "medications"]:
+                self.meds = [m for m in p.get("medications", []) if isinstance(m, dict)]
+            case ["notify", "push"]:
+                # 복약은 확인도 기록도 하지 않는다 (설계). day.medications 가
+                # 영원히 비므로 상황판에는 '보낸 횟수' 를 보여준다.
+                if str(p.get("scenario")) == "MEDICATION":
+                    self.med_push += 1
         return []
 
     def render(self) -> str:
@@ -802,8 +852,12 @@ class BoardView(View):
         else:
             row("  억제   없음")
         row()
-        meals, hyd, med = self._today()
-        row(f"  오늘   끼니 {meals}   수분 {hyd}   복약 {med}")
+        meals, hyd, _ = self._today()
+        row(f"  오늘   끼니 {meals}   수분 {hyd}   복약 알림 {self.med_push}")
+        if self.meds:
+            names = ", ".join(str(m.get("name", "?")) for m in self.meds[:3])
+            more = f" +{len(self.meds) - 3}" if len(self.meds) > 3 else ""
+            row(f"  등록약 {names}{more}")
         row()
 
         if not self.nodes:
@@ -900,15 +954,179 @@ class T0View(View):
         return [head + "   ".join(bits)]
 
 
+# ─── 7. 디스플레이 ───────────────────────────────────────────────────────
+
+class DisplayView(View):
+    """기기 화면 대역. 로그가 아니라 '지금 띄워져 있는 것' 하나만 보여준다.
+
+    평소에는 빈 화면이다 — 실제 디스플레이도 꺼져 있다. 알림이 오면
+    띄우고, 끝나면 다시 내린다.
+
+    음성은 진짜 스피커로 나가므로 상자를 따로 두지 않고 ♪ 한 줄로만 적는다.
+    """
+
+    title = "디스플레이"
+    live = True
+    W = 46
+
+    # push 에 만료 시각이 안 실린다. cancel 이 안 올 때를 위한 안전장치
+    HOLD_SEC = 60.0
+
+    def __init__(self, inv: Inventory) -> None:
+        super().__init__(inv)
+        self.cur: dict | None = None        # 지금 띄워진 push 페이로드
+        self.cur_at: float = 0.0            # 띄운 시각 (모니터 기준)
+        self.speech: str = ""
+        self.acked: str = ""                # ack_type
+        self.last: str = ""                 # 내린 뒤 아래에 남길 한 줄
+
+    def topics(self) -> list[str]:
+        return ["hestia/notify/push", "hestia/notify/speak",
+                "hestia/notify/ack", "hestia/notify/cancel",
+                "hestia/registry/devices"]
+
+    # ---- 수신
+
+    def handle(self, topic: str, p: dict) -> list[str]:
+        tail = topic.split("/")[-1]
+        nid = p.get("notify_id")
+
+        if tail == "devices":
+            self.inv.apply_registry(p.get("devices", []))
+            return []
+
+        if tail == "push":
+            self.cur = p
+            self.cur_at = time.time()
+            self.speech = ""
+            self.acked = ""
+            return []
+
+        if self.cur is None or nid != self.cur.get("notify_id"):
+            return []                        # 지금 띄운 것과 다른 알림
+
+        if tail == "speak":
+            self.speech = str(p.get("text", ""))
+        elif tail == "ack":
+            self.acked = str(p.get("ack_type", "확인"))
+        elif tail == "cancel":
+            self._down("취소됨" if not self.acked else f"{self.acked}")
+        return []
+
+    def _down(self, why: str) -> None:
+        if self.cur is not None:
+            scen = self.cur.get("payload", {}).get("title") or self.cur.get("scenario", "")
+            self.last = f"마지막: {scen} — {why} {time.strftime('%H:%M')}"
+        self.cur = None
+        self.speech = ""
+        self.acked = ""
+
+    def _expire(self) -> None:
+        if self.cur is None:
+            return
+        now = time.time()
+        deadline = self.cur.get("ack_deadline")
+        if self.cur.get("requires_ack") and deadline and now > float(deadline):
+            self._down("무응답")
+            return
+        if now - self.cur_at > self.HOLD_SEC:
+            self._down("표시 종료")
+
+    # ---- 그리기
+
+    def _where(self) -> str:
+        """사용자 눈에 이게 어디에 떴나.
+
+        channels 는 기기 vid 와 'voice' 가 섞여 온다. vid 는 어느 보드가
+        띄웠는지일 뿐이고, 보는 사람에게는 'TV 배너' 인지 '냉장고 보드'
+        인지가 전부다. proxy_for 가 그걸 말해준다.
+        """
+        p = self.cur or {}
+        screens, others = [], []
+        for c in p.get("channels", []):
+            c = str(c)
+            if self.inv.label(c):
+                screens.append(c)
+            elif c == "voice":
+                others.append("음성")
+            else:
+                others.append(c)
+
+        if not screens:
+            return "화면 없음 — " + (", ".join(others) or "채널 없음")
+
+        vid = screens[0]
+        proxy = p.get("proxy_for")
+        if proxy:
+            what = PROXY_KO.get(str(proxy), str(proxy))
+        else:
+            what = PROXY_KO.get(self.inv.kind(vid), self.inv.label(vid))
+        return f"{self.inv.area(vid)} {what}"
+
+    def render(self) -> str:
+        self._expire()
+        W = self.W
+        clock = time.strftime("%H:%M:%S")
+
+        if self.cur is None:
+            body = [""] * 6
+            if self.last:
+                body.append(" " + self.last)
+            body += [""] * 2
+            body.append(" " * max(0, W + 4 - len(clock)) + clock)
+            return "\n".join(body)
+
+        p = self.cur
+        L: list[str] = [" ┌" + "─" * (W + 2) + "┐"]
+
+        def row(s: str = "") -> None:
+            L.append(f" │ {pad(s, W)} │")
+
+        row(f"{pad(self._where(), W - len(clock))}{clock}")
+        row("─" * W)
+        row()
+
+        payload = p.get("payload") or {}
+        if payload.get("title"):
+            row(middle(payload["title"], W))
+            row()
+        for line in fold(str(payload.get("text", "")), W - 4):
+            row(middle(line, W))
+        row()
+
+        if self.speech:
+            for i, line in enumerate(fold(self.speech, W - 6)):
+                row(("  ♪ " if i == 0 else "    ") + line)
+            row()
+
+        row("─" * W)
+        row("  " + self._footer())
+        L.append(" └" + "─" * (W + 2) + "┘")
+        return "\n".join(L)
+
+    def _footer(self) -> str:
+        p = self.cur or {}
+        if self.acked:
+            return f"확인됨 ({self.acked})"
+        lv = p.get("escalation_level", 0)
+        if p.get("requires_ack"):
+            until = f" · {hhmm(p['ack_deadline'])} 까지" if p.get("ack_deadline") else ""
+            return f"확인 버튼을 눌러주세요{until} · 단계 {lv}"
+        return f"확인 없이 표시 · 단계 {lv}"
+
+
 VIEWS: dict[str, type[View]] = {
     "input": InputView, "activity": ActivityView, "decision": DecisionView,
     "action": ActionView, "board": BoardView, "t0": T0View,
+    "display": DisplayView,
 }
 
 
 # ─── 구동 ────────────────────────────────────────────────────────────────
 
-CLEAR = "\033[2J\033[H"
+# 커서를 집으로(H) 보낸 뒤 거기서부터 지운다(J). 2J 를 먼저 쓰면 터미널에
+# 따라 화면을 스크롤백으로 밀어내서 프레임이 아래로 쌓인다.
+CLEAR = "\033[H\033[J"
 
 
 def main() -> int:
@@ -918,16 +1136,23 @@ def main() -> int:
     ap.add_argument("--view", required=True, choices=sorted(VIEWS))
     ap.add_argument("--config", type=Path, default=None,
                     help="demo.toml. vid → 구역·라벨 (registry retained 가 오면 덮어씀)")
+    ap.add_argument("--hold", type=float, default=None,
+                    help="display 창: cancel 이 안 올 때 몇 초 뒤 내릴지 (기본 60)")
     args = ap.parse_args()
 
     inv = Inventory()
     if args.config:
         inv.load_config(args.config)
 
-    view = VIEWS[args.view](inv)
-    board = isinstance(view, BoardView)
+    # 파일이나 파이프로 받으면 화면 제어가 안 먹는다. 그때는 안 지운다
+    clear = CLEAR if sys.stdout.isatty() else ""
 
-    print(CLEAR if board else view.banner(), end="", flush=True)
+    view = VIEWS[args.view](inv)
+    if args.hold is not None and hasattr(view, "HOLD_SEC"):
+        view.HOLD_SEC = args.hold
+    board = view.live
+
+    print(clear if board else view.banner(), end="", flush=True)
 
     def on_connect(client, userdata, flags, rc, properties=None):
         if getattr(rc, "value", rc) != 0:
@@ -953,7 +1178,7 @@ def main() -> int:
             print(f"  처리 실패 {msg.topic}: {exc}", file=sys.stderr)
             return
         if board:
-            print(CLEAR + view.render(), flush=True)
+            print(clear + view.render(), end="", flush=True)
             return
         for line in lines:
             print(line, flush=True)
@@ -976,7 +1201,7 @@ def main() -> int:
     try:
         while True:
             if board:
-                print(CLEAR + view.render(), flush=True)
+                print(clear + view.render(), end="", flush=True)
                 time.sleep(1.0)                       # 시계를 돌려야 한다
             else:
                 time.sleep(0.5)

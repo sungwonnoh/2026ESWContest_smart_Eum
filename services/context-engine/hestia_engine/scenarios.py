@@ -104,6 +104,7 @@ class ScenarioRunner:
         self._probe: SleepProbe | None = None
         self.asleep: AsleepState | None = None
         self._last_awake_at: float | None = None
+        self._awake_floor: float | None = None    # 수면 t0 가 이보다 앞설 수 없다
         self._pending_restore: tuple[str, int] | None = None
         self._probe_base: dict[str, int] = {}
         self._awake_areas: set[str] | None = None   # None = sleep_end 를 못 봤다
@@ -180,6 +181,7 @@ class ScenarioRunner:
         if self.asleep is not None:
             woke_at = self._woke_at(now)
             if woke_at is not None:
+                self._awake_floor = woke_at
                 self._log_sleep("sleep_end", woke_at)
                 self._emit_decision(Decision(
                     kind="sleep", candidate=False, reason="WOKE",
@@ -354,6 +356,7 @@ class ScenarioRunner:
             self._end_probe()
             self._probe = None
             self._last_awake_at = now
+            self._awake_floor = now
             self._emit_sleep_decision(probe, asleep=False, now=now)
             return []
 
@@ -388,15 +391,25 @@ class ScenarioRunner:
         return []
 
     def _responded(self, probe: SleepProbe) -> bool:
-        """깨어 있다는 증거. 누르거나 명확히 움직이거나 되돌렸다."""
+        """깨어 있다는 증거. 누르거나 움직이거나 되돌렸거나, 침대에서 내려왔다."""
         if probe.notify_id is not None:
             pending = self._notifier.store.get(probe.notify_id)
             if pending is not None and pending.acked:
                 return True
         if probe.target is not None and self._controller.reverted(probe.target):
             return True
-        if probe.area is not None and self._moving_since(probe.area) is not None:
+        if probe.area is None:
+            return False
+        if self._moving_since(probe.area) is not None:
             return True                     # 뒤척임이 아닌 움직임
+
+        # 침대에서 내려왔다. 프로브 중에 패드가 풀린 것은 가장 분명한
+        # '깨어 있다' 다 — 일어나 걸어나간 것이다. 움직임만 보면 놓친다:
+        # 방을 떠나면 present=False 가 되어 _moving_since 가 None 이고,
+        # 그러면 프로브가 계속 돌아 화장실에 있는 사람을 수면으로 확정한다.
+        bed = self._bed_in(probe.area)
+        if bed is not None and not bed.occupied and bed.changed_at > probe.started_at:
+            return True
         return False
 
     def _end_probe(self) -> None:
@@ -427,13 +440,17 @@ class ScenarioRunner:
                 },
             ))
 
+        t0 = still_since
+        if self._awake_floor is not None and self._awake_floor > t0:
+            t0 = self._awake_floor
+
         self._log_sleep(
-            "sleep_start", still_since,
+            "sleep_start", t0,
             area=area, method=method, confidence=confidence,
             awake_areas=self._take_awake_areas(area),
         )
         self.asleep = AsleepState(
-            since=still_since, area=area, decision_id=decision_id,
+            since=t0, area=area, decision_id=decision_id,
         )
         self._notify_asleep(area)
 
@@ -584,6 +601,7 @@ class ScenarioRunner:
             if since is None:
                 # 움직이는 중. 멈추는 순간 센서가 메시지를 보내
                 # 다시 걸리므로 예약하지 않는다.
+                self._notifier.resolve("SAFETY")
                 self._emit_decision(Decision(
                     kind=f"safety:{area}",
                     candidate=False,
@@ -605,6 +623,7 @@ class ScenarioRunner:
             decision_id = self._emit_decision(decision)
 
             if not over:
+                self._notifier.resolve("SAFETY")
                 timers.append((f"safety-{area}", since + limit))
                 continue
 
@@ -762,9 +781,20 @@ class ScenarioRunner:
         """고정 시각. times 각각에 한 번."""
         out: list[tuple[str, float]] = []
 
+        # 오늘 등록한 약이면 등록 시각 이전의 분량은 건너뛴다.
+        # 어제 이전부터 알고 있던 약은 하루 전체가 유효하다.
+        reg_at = self._config.medications_at
+        reg_min = (
+            minutes_since_midnight(reg_at)
+            if reg_at > 0.0 and day_key(reg_at) == today
+            else -1
+        )
+
         for at in med.schedule.times:
             if (med.id, at, today) in self._med_fired:
                 continue
+            if at < reg_min:
+                continue                 # 등록 전에 지나간 시각이다
             if minutes < at:
                 out.append(("medication", now + (at - minutes) * 60.0))
                 continue
@@ -786,6 +816,7 @@ class ScenarioRunner:
 
         limit = int(self._med_cfg("max_meal_slots", 3))
         delay = med.schedule.delay_min * 60.0
+        reg_at = self._config.medications_at      # 0.0 = 모른다
         out: list[tuple[str, float]] = []
 
         for peak in sorted(peaks, key=lambda p: p.from_)[:limit]:
@@ -795,6 +826,8 @@ class ScenarioRunner:
             end = self._meal_end_in(peak, today)
             if end is None:
                 continue                 # 아직 안 드셨다. 식사 알림이 맡는다.
+            if reg_at > 0.0 and end < reg_at:
+                continue                 # 등록 전에 끝난 끼니다
 
             if now >= end + delay:
                 self._send_medication(context, med, peak.center, now, today)
@@ -802,6 +835,7 @@ class ScenarioRunner:
                 out.append(("medication", end + delay))
 
         return out
+        
 
     def _meal_end_in(self, peak: Any, today: str) -> float | None:
         """그 봉우리 구간에 끝난 식사의 종료 시각."""
@@ -1035,6 +1069,7 @@ class ScenarioRunner:
             return []
         if self._controller.reverted(vid):
             self._dl = None
+            self._controller.forget(vid)
             self._dl_hold = now + float(self._dl_value("manual_override_sec", 7200))
             return [("day-light", self._dl_hold)]
 
