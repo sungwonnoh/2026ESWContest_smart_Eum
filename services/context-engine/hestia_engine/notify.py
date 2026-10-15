@@ -198,6 +198,8 @@ class ChannelSelector:
             if want == VOICE:
                 continue                        # voice 는 별도 경로
             actual = PROXY_TYPES.get(want, want)    # want는 affinity에서 온 원하는 종류, actual은 실제로 찾을 종류 (PROXY_TYPE에 없으면 actual에 want를 그대로 돌려줌)
+            if actual != want and not self._proxy_usable(want, area):
+                continue 
             for vid in self._config.channels(area):
                 d = self._config.device(vid)
                 if d is None or d.device_type != actual:
@@ -219,9 +221,30 @@ class ChannelSelector:
         for want in self._policy(scenario, "affinity", default=[]):
             if want == d.device_type:
                 return None             # 자기가 1순위면 대행이 아니다
-            if PROXY_TYPES.get(want) == d.device_type:
+            if PROXY_TYPES.get(want) != d.device_type:
+                continue
+            # 그 구역에 실제로 그 기기가 있어야 '대행' 이라 부를 수 있다.
+            # 거실 보드는 TV 배너이지 냉장고 보드가 아니다.
+            if self._proxy_usable(want, d.area):
                 return want
         return None
+
+    def _proxy_usable(self, want: str, area: str | None) -> bool:
+        """대행 대상이 (구역을 알면 그 구역에) 있고, 전원이 있다면 켜져 있나.
+
+        TV 배너는 TV 화면에 겹쳐 띄운다 — TV 가 꺼져 있으면 아무도 못 본다.
+        냉장고 보드는 전원 개념이 없어(상태에 door 만 있다) 있기만 하면 쓴다.
+        구역을 모르면(presence 없음) 구역 조건은 보지 않는다 — 모르는 것은
+        막을 근거가 아니다.
+        """
+        for d in self._config.all_devices():
+            if not d.enabled or d.device_type != want:
+                continue
+            if area is not None and d.area != area:
+                continue
+            if self._powered(d.id):
+                return True
+        return False
     
     def _powered(self, vid: str) -> bool:
         """명세: power == ON 인 기기만 후보다.
