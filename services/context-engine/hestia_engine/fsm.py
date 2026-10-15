@@ -449,7 +449,6 @@ class DayFSM:
         )
 
     def note_medication(self, prompted: bool = False) -> None:
-        """복약은 이벤트로 판정할 수 없다 — ack 로만 확인한다 (명세)."""
         self._append("medications", "medication", prompted)
 
     def done_at(self, kind: str) -> float | None:

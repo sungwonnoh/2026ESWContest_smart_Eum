@@ -767,6 +767,8 @@ class BoardView(View):
         self.nodes: dict[str, dict] = {}
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
+        self.meds: list[dict] = []         # registry/medications — 등록된 약
+        self.med_push = 0                  # 오늘 복약 알림 발송 횟수
         self.day = time.strftime("%Y-%m-%d")
 
     def topics(self) -> list[str]:
@@ -775,7 +777,9 @@ class BoardView(View):
                 "hestia/context/suppression", "hestia/context/day",
                 "hestia/log/t0",
                 "hestia/node/+/announce", "hestia/node/+/status",
-                "hestia/registry/devices"]
+                "hestia/registry/devices",
+                "hestia/registry/medications",
+                "hestia/notify/push"]
 
     def handle(self, topic: str, p: dict) -> list[str]:
         match topic.split("/")[1:]:
@@ -806,6 +810,13 @@ class BoardView(View):
                 n["ts_synced"] = bool(p.get("ts_synced"))
             case ["registry", "devices"]:
                 self.inv.apply_registry(p.get("devices", []))
+            case ["registry", "medications"]:
+                self.meds = [m for m in p.get("medications", []) if isinstance(m, dict)]
+            case ["notify", "push"]:
+                # 복약은 확인도 기록도 하지 않는다 (설계). day.medications 가
+                # 영원히 비므로 상황판에는 '보낸 횟수' 를 보여준다.
+                if str(p.get("scenario")) == "MEDICATION":
+                    self.med_push += 1
         return []
 
     def render(self) -> str:
@@ -841,8 +852,12 @@ class BoardView(View):
         else:
             row("  억제   없음")
         row()
-        meals, hyd, med = self._today()
-        row(f"  오늘   끼니 {meals}   수분 {hyd}   복약 {med}")
+        meals, hyd, _ = self._today()
+        row(f"  오늘   끼니 {meals}   수분 {hyd}   복약 알림 {self.med_push}")
+        if self.meds:
+            names = ", ".join(str(m.get("name", "?")) for m in self.meds[:3])
+            more = f" +{len(self.meds) - 3}" if len(self.meds) > 3 else ""
+            row(f"  등록약 {names}{more}")
         row()
 
         if not self.nodes:
