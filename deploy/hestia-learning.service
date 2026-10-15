@@ -1,0 +1,11 @@
+[Unit]
+Description=HESTIA Learning (RPi4) — t0 로그 학습 → hestia/model/kde 발행
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 상시 실행이 아니라 hestia-learning.timer 가 하루 한 번 깨운다
+Type=oneshot
+EnvironmentFile=/etc/hestia/learning.env
+WorkingDirectory=/data/hestia-learning
+ExecStart=/usr/bin/python3 run_learning.py
