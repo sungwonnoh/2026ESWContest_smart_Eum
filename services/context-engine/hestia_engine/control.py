@@ -160,6 +160,15 @@ class Controller:
         """그 기기에 마지막으로 내린 명령."""
         return self._last.get(target)
 
+    def forget(self, target: str) -> None:
+        """그 기기의 마지막 명령 기록을 지운다.
+
+        reverted() 는 관측값과 마지막 명령을 매번 비교하는 순수 판정이라,
+        사용자가 되돌린 값을 그대로 두면 영원히 True 다. 되돌림을 받아들인
+        쪽에서 이것을 불러 기록을 지워야 유예가 한 번으로 끝난다.
+        """
+        self._last.pop(target, None)
+
     def reverted(self, target: str) -> bool:
         """사용자가 명령을 되돌렸는가.
         """

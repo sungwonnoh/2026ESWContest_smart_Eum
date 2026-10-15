@@ -38,6 +38,7 @@ VOICE = "voice"          # RPi4 스피커. device_type 이 아닌 예약값
 # 종료 사유 — outcome 에 실리지는 않지만 로그와 테스트에서 쓴다.
 CLOSED_SEEN = "SEEN"
 CLOSED_TIMEOUT = "TIMEOUT"
+CLOSED_RESOLVED = "RESOLVED"        # 조건이 스스로 해소됨 (낙상 후 다시 움직임)
 CLOSED_EXPIRED = "EXPIRED"
 CLOSED_CANCELLED = "CANCELLED"
 CLOSED_SENT = "SENT"
@@ -490,6 +491,26 @@ class Notifier:
         # 봤다고 한 것이지 했다는 뜻은 아니다. comply 창은 계속 돈다
         if n.comply_check is None:
             self._close(notify_id, CLOSED_SEEN)
+
+
+    def resolve(self, scenario: str, reason: str = CLOSED_RESOLVED) -> int:
+        """그 시나리오의 열린 알림을 거둔다 — 조건이 스스로 해소된 경우다.
+
+        낙상 알림을 보낸 뒤 사람이 다시 움직이면 확인을 기다릴 이유가 없고,
+        화면에 "괜찮으신가요?" 를 띄워둘 이유도 없다. on_ack 와 같은 모양으로
+        cancel 까지 보낸다.
+
+        comply 창은 _close 가 알아서 남겨둔다 — '결국 움직였나' 는 보호자가
+        볼 이력이고 여기서 끊으면 그 기록이 사라진다.
+        """
+        closed = 0
+        for n in self.store.of_scenario(scenario):
+            if not n.is_open:
+                continue
+            self._cancel(n.notify_id)
+            self._close(n.notify_id, reason)
+            closed += 1
+        return closed
 
     # ------------------------------------------------------------ 타이머
 

@@ -584,6 +584,7 @@ class ScenarioRunner:
             if since is None:
                 # 움직이는 중. 멈추는 순간 센서가 메시지를 보내
                 # 다시 걸리므로 예약하지 않는다.
+                self._notifier.resolve("SAFETY")
                 self._emit_decision(Decision(
                     kind=f"safety:{area}",
                     candidate=False,
@@ -605,6 +606,7 @@ class ScenarioRunner:
             decision_id = self._emit_decision(decision)
 
             if not over:
+                self._notifier.resolve("SAFETY")
                 timers.append((f"safety-{area}", since + limit))
                 continue
 
@@ -1035,6 +1037,7 @@ class ScenarioRunner:
             return []
         if self._controller.reverted(vid):
             self._dl = None
+            self._controller.forget(vid)
             self._dl_hold = now + float(self._dl_value("manual_override_sec", 7200))
             return [("day-light", self._dl_hold)]
 
