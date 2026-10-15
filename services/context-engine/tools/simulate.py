@@ -82,6 +82,7 @@ GRID_N = 1440 // GRID_STEP
 
 class Simulator:
     """가전 상태를 들고 cmd 에 반응한다. 센서는 손으로 쏜다."""
+    LUX_PER_BRIGHTNESS = 4.0
 
     def __init__(self, config: Config, host: str, port: int, *, watch: bool = True) -> None:
         self._config = config
@@ -104,6 +105,8 @@ class Simulator:
 
         self._last_notify_id: str | None = None
         self._last_context: dict[str, str] = {}
+        self._fridge_opened_at: float | None = None
+        self._lux_base: float = 100.0      # lux 명령이 준 '조명을 뺀' 바닥 조도
 
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
@@ -319,6 +322,10 @@ class Simulator:
         """내부 상태를 바꾸고 state 를 발행한다."""
         self.devices.setdefault(vid, {}).update(changes)
         self._publish_state(vid)
+
+        d = self._config.device(vid)
+        if d is not None and d.device_type == "smart_light":
+            self._publish_lux()
 
     def _publish_state(self, vid: str) -> None:
         d = self._config.device(vid)
@@ -557,11 +564,17 @@ class Simulator:
         if vid is None:
             return
         opened = bool(args) and args[0] == "open"
+        now = time.time()
         self._set(vid, door="OPEN" if opened else "CLOSED")
         if opened:
+            self._fridge_opened_at = now
             self._publish_event(vid, "door_opened")
         else:
-            self._publish_event(vid, "door_closed", open_duration_sec=12.0)
+            # 실제로 열려 있던 시간을 보낸다. 고정값이면 '문을 오래 열어둔
+            # 이상' 을 테스트할 방법이 없다.
+            held = now - self._fridge_opened_at if self._fridge_opened_at else 0.0
+            self._fridge_opened_at = None
+            self._publish_event(vid, "door_closed", open_duration_sec=round(held, 1))
         print(f"  {vid} door={'OPEN' if opened else 'CLOSED'}")
 
     def _washer(self, args: list[str]) -> None:
@@ -667,13 +680,20 @@ class Simulator:
         if args and args[0] in self._config.areas:
             area, args = args[0], args[1:]
 
+        if area is None:
+            pads = self._sensors_of_type("bed")
+            if len(pads) > 1:
+                where = " | ".join(self._config.sensor(v).area for v in pads)
+                print(f"  침대 패드가 여럿이다 — 구역을 적어라: bed <{where}>")
+                return
+
         vid = self._sensor_in(area, "bed") if area else self._sensor_of_type("bed")
         if vid is None:
             print(f"bed 센서가 없음{f' ({area})' if area else ''}")
             return
         occupied = not args or args[0] != "off"
         self._publish_sensor(vid, occupied=occupied)
-        print(f"  {vid} occupied={occupied}")
+        print(f"  {vid} ({self._config.sensor(vid).area}) occupied={occupied}")
 
     def _door(self, args: list[str]) -> None:
         vid = self._sensor_of_type("door")
@@ -712,13 +732,34 @@ class Simulator:
         print(f"  {vid} {temp}°C {hum}%")
 
     def _lux(self, args: list[str]) -> None:
-        vid = self._sensor_of_type("light")
-        if vid is None:
+        """lux <값> — 조명을 뺀 바닥 조도. 발행값은 조명 기여를 더한 것이다."""
+        if self._sensor_of_type("light") is None:
             print("light 센서가 없음")
             return
-        lux = float(args[0]) if args else 100.0
-        self._publish_sensor(vid, illuminance_lux=lux)
-        print(f"  {vid} {lux} lux")
+        self._lux_base = float(args[0]) if args else 100.0
+        self._publish_lux()
+
+    def _publish_lux(self) -> None:
+        """바닥 조도 + 같은 구역에서 켜져 있는 조명의 기여를 발행한다.
+
+        실물에서는 조명을 올리면 조도가 따라 올라 DAY_LIGHT 가 데드밴드에
+        들어가 멈춘다. 그 고리가 없으면 밝기 100 까지 올라간다.
+        """
+        vid = self._sensor_of_type("light")
+        if vid is None:
+            return
+        s = self._config.sensor(vid)
+        added = 0.0
+        for d in self._config.all_devices():
+            if d.device_type != "smart_light" or d.area != s.area:
+                continue
+            st = self.devices.get(d.id, {})
+            if st.get("power") != "ON":
+                continue
+            added += float(st.get("brightness", 0)) * self.LUX_PER_BRIGHTNESS
+        total = round(self._lux_base + added, 1)
+        self._publish_sensor(vid, illuminance_lux=total)
+        print(f"  {vid} {total} lux (바닥 {self._lux_base:g} + 조명 {added:g})")
 
     # ------------------------------------------------------------ 모델·복약
 
@@ -1034,15 +1075,9 @@ class Simulator:
         )
 
     def _fridge_cycle(self) -> None:
-        vid = self._first_of_type("smart_fridge")
-        if vid is None:
-            return
-        self._set(vid, door="OPEN")
-        self._publish_event(vid, "door_opened")
-        self._after(2, "", lambda: (
-            self._set(vid, door="CLOSED"),
-            self._publish_event(vid, "door_closed", open_duration_sec=2.0),
-        ))
+        """열고 2초 뒤 닫는다. 개폐 시간은 _fridge 가 실제로 잰다."""
+        self._fridge(["open"])
+        self._after(2, "", lambda: self._fridge(["close"]))
 
     def _sc_sleep(self) -> None:
         """침실 재실 → 정지 → 프로브 → 확정.

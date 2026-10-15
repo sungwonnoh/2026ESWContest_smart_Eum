@@ -386,12 +386,11 @@ class ActivityEvaluator:
         return any(self._low_energy(a) for a in areas)
 
     def _low_energy(self, area: str) -> bool:
-        still_max = float(self._config.value("presence", "energy", "still_max", default=10))
         active_min = float(self._config.value("presence", "energy", "active_min", default=30))
-        for st in self._world.sensors_of(area):
-            if isinstance(st, PresenceState) and st.present:
-                return st.energy < active_min
-        return False
+        return any(
+            isinstance(st, PresenceState) and st.present and st.energy < active_min
+            for st in self._world.sensors_of(area)
+        )
 
 
     def _tv(self):
