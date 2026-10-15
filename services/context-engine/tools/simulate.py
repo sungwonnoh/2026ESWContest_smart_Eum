@@ -486,6 +486,9 @@ class Simulator:
                 self._med(args)
             case "weather":
                 self._weather(args)
+            case "ok":
+                # 디스플레이의 확인 버튼. 실제로는 ESP32 버튼이 이 경로다
+                self._ack(["SEEN"])
             case "ack":
                 self._ack(args)
             case "profile":
@@ -1168,7 +1171,13 @@ HELP = """
   med [clear]              복약 등록 (감기약 식후 1분 / 혈압약 2분 뒤)
   weather [on|off|dry]     특보. on=폭염 → HEAT_ADVISORY 수분 알림
   profile [REAL|DEMO]      프로파일 전환
+  ok                       확인 버튼 (= ack SEEN)
   ack [SEEN|DELIVERED]     마지막 알림에 응답
+
+수면 프로브에 "깨어 있다"고 답하는 길은 셋이다 (scenarios._responded)
+  ok                       버튼 — 배너 프로브처럼 알림이 있을 때만
+  light <구역> <밝기>       조명을 되돌림 — dim 프로브
+  presence <구역>           움직임 — 언제나
 
 묶음
   home                     거실 재실, 나머지 비움

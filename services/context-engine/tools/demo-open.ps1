@@ -1,4 +1,4 @@
-# 시연 화면. 창 여섯을 각각 별도 PowerShell 창으로 띄운다 (Windows).
+# 시연 화면. 창 일곱을 각각 별도 PowerShell 창으로 띄운다 (Windows).
 #
 # macOS 는 demo-open.sh, tmux 는 demo-screen.sh. 이쪽은 윈도우용이다.
 #
@@ -15,7 +15,7 @@ param(
     [string]$MqttHost = $(if ($env:MQTT_HOST) { $env:MQTT_HOST } else { "localhost" }),
     [int]$Port = 1883,
     [string]$Config = "",
-    [string[]]$Views = @("input", "activity", "decision", "action", "board", "t0")
+    [string[]]$Views = @("input", "activity", "decision", "action", "board", "t0", "display")
 )
 
 $ErrorActionPreference = "Stop"
