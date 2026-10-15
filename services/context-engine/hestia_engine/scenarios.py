@@ -391,15 +391,25 @@ class ScenarioRunner:
         return []
 
     def _responded(self, probe: SleepProbe) -> bool:
-        """깨어 있다는 증거. 누르거나 명확히 움직이거나 되돌렸다."""
+        """깨어 있다는 증거. 누르거나 움직이거나 되돌렸거나, 침대에서 내려왔다."""
         if probe.notify_id is not None:
             pending = self._notifier.store.get(probe.notify_id)
             if pending is not None and pending.acked:
                 return True
         if probe.target is not None and self._controller.reverted(probe.target):
             return True
-        if probe.area is not None and self._moving_since(probe.area) is not None:
+        if probe.area is None:
+            return False
+        if self._moving_since(probe.area) is not None:
             return True                     # 뒤척임이 아닌 움직임
+
+        # 침대에서 내려왔다. 프로브 중에 패드가 풀린 것은 가장 분명한
+        # '깨어 있다' 다 — 일어나 걸어나간 것이다. 움직임만 보면 놓친다:
+        # 방을 떠나면 present=False 가 되어 _moving_since 가 None 이고,
+        # 그러면 프로브가 계속 돌아 화장실에 있는 사람을 수면으로 확정한다.
+        bed = self._bed_in(probe.area)
+        if bed is not None and not bed.occupied and bed.changed_at > probe.started_at:
+            return True
         return False
 
     def _end_probe(self) -> None:
