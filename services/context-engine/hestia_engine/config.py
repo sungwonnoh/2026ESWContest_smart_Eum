@@ -103,6 +103,7 @@ class Config:
         self._profile = "REAL"
         self._install(sensors, devices)
         self._medications: tuple[Any, ...] = ()
+        self._medications_at: float = 0.0    # registry 를 받은 시각(메시지의 sent_ts)
 
     # ------------------------------------------------------------ 인덱스
 
@@ -373,13 +374,18 @@ class Config:
 
     # ------------------------------------------------------------ 복약
 
-    def apply_medications(self, entries: Any) -> None:
+    def apply_medications(self, entries: Any, sent_ts: float = 0.0) -> None:
         """MedicationRegistry 의 medications 로 전체 교체한다.
 
         retained 라 재시작하면 브로커가 다시 물려준다. 부분 갱신이
         아닌 이유는 registry 와 같다 — 앱에서 약을 지울 수 있다.
+
+        sent_ts 는 앱이 발행한 시각이다. retained 라 재시작 때 다시 받아도
+        값이 그대로여서 '언제 등록된 약인가' 를 알 수 있다 — 등록 전에
+        지나간 분량을 보내지 않는 판단에 쓴다. 0.0 은 '모른다' 다.
         """
         self._medications = tuple(entries)
+        self._medications_at = float(sent_ts)
         log.info("복약 등록 적용: %d건", len(self._medications))
 
     def medications_on(self, date_str: str) -> tuple[Any, ...]:
@@ -397,7 +403,11 @@ class Config:
     def medications(self) -> tuple[Any, ...]:
         """등록된 전부. 날짜 무관 — 재처방 알림이 쓴다."""
         return self._medications
-    
+
+    @property
+    def medications_at(self) -> float:
+        """복약 등록을 받은 시각. 0.0 은 '모른다'."""
+        return self._medications_at
 
     def __repr__(self) -> str:
         return (

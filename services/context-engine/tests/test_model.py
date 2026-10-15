@@ -339,6 +339,23 @@ def test_bins_normal():
     assert bins[-1] == 43                # 10:45
 
 
+def test_bins_unaligned_start():
+    """from_ 이 격자 배수가 아니어도 비지 않는다.
+
+    배치가 KDE 로 계산한 봉우리는 임의의 분이다. from_ 을 내림한 칸의
+    시작 시각은 from_ 보다 앞서는데, 시작 시각만 보고 거르면 첫 칸에서
+    바로 끊겨 bins 가 통째로 빈다. 그러면 peak_tail 이 꼬리를 1.0 으로
+    돌려주고 MEAL_PROMPT 가 영영 안 나간다.
+    """
+    p = MealPeak(884, 764, 1004, None, 1.0, 1.0)    # 12:44~16:44
+    bins = p.bins(15, 96)
+
+    assert bins                                      # 비지 않는다
+    assert bins[0] == 50                             # 12:30 칸 — from_ 이 그 안이다
+    assert 764 // 15 in bins                         # grid_slot 은 내림이다
+    assert bins[-1] == 66                            # 16:30 칸 — to 가 그 안이다
+
+
 # ============================================================ peak_tail
 
 
@@ -379,6 +396,15 @@ def test_peak_tail_wraps():
     p = MealPeak(1140, 1020, 180, None, 1.0, 1.0)
     assert peak_tail(d, p, 1020) == pytest.approx(1.0)      # 17:00 — 시작
     assert peak_tail(d, p, 60) < 0.3                        # 01:00 — 거의 끝
+
+
+def test_peak_tail_unaligned_peak():
+    """격자 배수가 아닌 봉우리에서도 꼬리가 줄어든다."""
+    d = uniform()
+    p = MealPeak(884, 764, 1004, None, 1.0, 1.0)    # 12:44~16:44
+
+    assert peak_tail(d, p, 764) == pytest.approx(1.0)   # 시작 — 전부 앞에 있다
+    assert peak_tail(d, p, 980) < 0.3                   # 16:20 — 거의 끝
 
 
 # ============================================================ peaks 검증

@@ -276,3 +276,11 @@ area = "living"
 source = "esp32"
 channel = true
 note = "ESP32 디스플레이 + 버튼. ack 입력 수단"
+
+[[devices]]
+id = "vd-11"
+device_type = "display_node"
+area = "kitchen"
+source = "esp32"
+channel = true
+note = "냉장고 보드 대행"

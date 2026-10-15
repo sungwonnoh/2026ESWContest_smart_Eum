@@ -59,6 +59,7 @@ class PresenceState(SensorState):
     energy: int = 0
     distance_cm: int = 0
     changed_at: float = 0.0        # present 전환 시각
+    prev_present: bool | None = None   # 전환 직전의 present. 첫 메시지면 None
     still_since: float | None = None   # energy 가 임계 아래로 내려간 시각
     moving_since: float | None = None  # energy 가 moving_min 위로 올라간 시각
 
@@ -305,6 +306,7 @@ class WorldState:
         #_get()이 처음 만든 센서 객체를 반환한다면, updated_at이 == 0.0, 즉 처음 만든 객체라면 first = True
 
         if msg.present != st.present or first:      #방금 도착한 메시지의 present값과 센서의 누적 상태(st)의 present가 다른경우
+            st.prev_present = None if first else st.present
             st.present = msg.present
             if changed_ts is not None:
                 st.changed_at = changed_ts

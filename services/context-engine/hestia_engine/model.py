@@ -46,12 +46,18 @@ class MealPeak:
     def bins(self, grid_step: int, n: int) -> list[int]:
         """이 구간에 속하는 density 칸 번호들. 순환을 편다.
            from 부터 시작해 to 까지, 자정을 넘으면 0으로 돌아간다.
+
+        칸이 구간에 '걸쳐' 있으면 포함한다. from_ 이 격자 배수가 아니면
+        첫 칸의 시작 시각은 from_ 보다 앞서는데, grid_slot 이 내림이므로
+        그 칸을 빼면 구간 시작 직후의 시각이 bins 에서 찾히지 않는다.
+        시작 시각만 보고 거르면 첫 칸에서 바로 break 되어 빈 리스트가
+        나오고, peak_tail 이 꼬리를 1.0 으로 돌려준다.
         """
         out: list[int] = []
         i = self.from_ // grid_step
         for _ in range(n):
             m = (i % n) * grid_step
-            if not self.contains(m):
+            if not (self.contains(m) or self.contains(m + grid_step - 1)):
                 break
             out.append(i % n)
             i += 1

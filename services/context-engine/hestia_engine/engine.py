@@ -212,8 +212,9 @@ class Engine:
             self._reset_contexts()
 
         if isinstance(msg, m.MedicationRegistry):
-            # 복약
-            self._config.apply_medications(msg.medications)
+            # 복약. sent_ts 로 '언제 등록된 약인가' 를 함께 넘긴다 —
+            # retained 라 재시작 때 다시 받아도 그 값은 그대로다.
+            self._config.apply_medications(msg.medications, msg.sent_ts)
 
         if isinstance(msg, m.ModelMessage):
             # 검증에 실패하면 교체하지 않는다 — 직전 모델로 계속 판단한다
