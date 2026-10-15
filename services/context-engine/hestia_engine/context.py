@@ -179,6 +179,15 @@ class PresenceEvaluator:
         offline = set(self._world.sensors_offline())
         found: list[Evidence] = []
 
+        denied = any(
+            isinstance(st, PresenceState)
+            and st.vid not in offline
+            and not st.present
+            and st.changed_at > 0.0
+            and now - st.changed_at >= grace
+            for st in self._world.sensors_of(area)
+        )
+
         for st in self._world.sensors_of(area):     #st = 해당 area의 센서들의 state 객체
             if st.vid in offline:
                 continue        # 죽은 노드의 센서는 판단에서 제외 (명세)
@@ -195,7 +204,11 @@ class PresenceEvaluator:
                     else:
                         # present=false 를 즉시 믿되, grace 만큼은 유예한다. (30초 유예)
                         # 노드 재부팅 직후의 한 건을 걸러내는 용도.
-                        if st.changed_at > 0.0 and now - st.changed_at < grace:
+                        if (
+                            st.prev_present
+                            and st.changed_at > 0.0
+                            and now - st.changed_at < grace
+                        ):
                             found.append(
                                 Evidence(
                                     st.vid, "mmwave_still",
@@ -207,7 +220,7 @@ class PresenceEvaluator:
 
                 case BedState():        #압력 패드
                     factors[f"{st.vid}_occupied"] = st.occupied
-                    if st.occupied:     #압력 패드가 점유 상태이면
+                    if st.occupied and not denied:
                         found.append(
                             Evidence(st.vid, "bed", float(conf.get("bed", 0.8)), st.changed_at or now)
                         )

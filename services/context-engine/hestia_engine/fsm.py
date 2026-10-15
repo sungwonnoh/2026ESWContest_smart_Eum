@@ -168,6 +168,7 @@ class MealFSM:
         self._log = t0log
         self.session: MealSession | None = None
         self._timed_out = False        # 타임아웃 후 재개 차단
+        self._closed_at = 0.0          # 직전 묶음이 끝난 시각
         self.on_close: Callable[[MealSession, float], None] | None = None
 
     @property
@@ -272,6 +273,8 @@ class MealFSM:
         # 타임아웃으로 닫을 때는 묶음이 now 까지 이어진 것이다.
         # 이탈로 닫을 때는 last_active_at 에 끝났고 grace 만큼 기다린 것뿐이다.
         duration = (now if use_now else s.last_active_at) - s.t0
+        self._closed_at = now if use_now else s.last_active_at
+
         min_dur = float(self._config.value("fsm", "meal", "min_duration_sec", default=120))
         if duration < min_dur:
             log.debug("식사 묶음 폐기 — 너무 짧음 (%.0f초)", duration)
@@ -310,6 +313,7 @@ class MealFSM:
             if isinstance(st, PowerState)
             and st.on_since is not None
             and now - st.on_since <= lookback
+            and st.on_since > self._closed_at      # 이미 닫힌 묶음의 근거는 남의 것이다
         ]
         if starts:
             return min(starts)

@@ -56,6 +56,7 @@ area_switch_min_sec = 20          # 구역 전환 최소 지속 (오가는 떨�
 # mmWave energy 임계 — 명세: "정지/미세움직임 판정은 노드가 아니라 RPi5 가"
 [presence.energy]
 still_max = 10                    # 이 이하면 정지
+active_min = 30                   # 이 밑이면 저에너지 (식사·착석 판정)
 moving_min = 40      # 이 위로 지속되면 깬 것 (뒤척임과 구별)
 
 # 근거별 확신도.
