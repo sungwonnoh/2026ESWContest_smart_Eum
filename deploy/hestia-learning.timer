@@ -1,0 +1,12 @@
+[Unit]
+Description=HESTIA Learning — 하루 한 번 모델 갱신
+
+[Timer]
+# 사용자가 자는 시간. 이 시각에 t0 가 거의 쌓이지 않아 학습이 한가하다
+OnCalendar=*-*-* 03:00:00
+# RPi4 가 꺼져 있다가 켜지면 놓친 실행을 바로 한다
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

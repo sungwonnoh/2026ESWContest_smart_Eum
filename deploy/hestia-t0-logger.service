@@ -1,0 +1,20 @@
+[Unit]
+Description=HESTIA t0 Logger (RPi4) — hestia/log/t0 → t0_log.jsonl
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# MQTT_HOST(RPi5), HESTIA_DATA. repo 밖에 둔다 — deploy/learning.env.example 참고
+EnvironmentFile=/etc/hestia/learning.env
+# learning-engine 모듈은 패키지가 아니라 스크립트라 그 폴더에서 실행해야 서로 import 된다
+WorkingDirectory=/data/hestia-learning
+ExecStart=/usr/bin/python3 t0_logger.py
+Restart=always
+RestartSec=5
+# 브로커(RPi5)가 늦게 떠도 connect_async 가 재시도하므로 의존을 강제하지 않는다
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
