@@ -321,11 +321,15 @@ class Simulator:
     def _set(self, vid: str, **changes: Any) -> None:
         """내부 상태를 바꾸고 state 를 발행한다."""
         self.devices.setdefault(vid, {}).update(changes)
-        self._publish_state(vid)
 
+        # 조도를 먼저 보낸다. 기기 상태가 먼저 가면 엔진이 묵은 조도로
+        # 판정해 한 단계 더 올린다. 조도가 먼저 가면 밝기만 한 틱 묵는데,
+        # 그건 '올릴지 말지' 가 아니라 '얼마나' 에만 영향을 준다.
         d = self._config.device(vid)
         if d is not None and d.device_type == "smart_light":
             self._publish_lux()
+
+        self._publish_state(vid)
 
     def _publish_state(self, vid: str) -> None:
         d = self._config.device(vid)
