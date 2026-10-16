@@ -64,6 +64,7 @@ class PresenceState(SensorState):
     moving_since: float | None = None  # energy 가 moving_min 위로 올라간 시각
     target: str | None = None          # NONE / MOVING / STATIC / BOTH
     dist_spread_cm: int | None = None  # 최근 10초 거리 변동폭
+    settled: bool = False
 
     def is_moving(self) -> bool:
         """이동 성분이 있는가. 사물은 절대 참이 되지 않는다."""
@@ -328,6 +329,7 @@ class WorldState:
         )
         spread = msg.dist_spread_cm
         settled = msg.present and spread is not None and spread < spread_max
+        st.settled = settled
 
         if settled:
             if st.still_since is None and changed_ts is not None:

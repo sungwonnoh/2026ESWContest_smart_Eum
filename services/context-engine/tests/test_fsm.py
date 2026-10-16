@@ -287,7 +287,7 @@ def test_microwave_opens_session(c):
     c.presence("vs-04", True)
     c.at(MORNING + 100).power("vs-14", 800, "ON")
     c.at(MORNING + 220).power("vs-14", 2, "OFF")
-    c.at(MORNING + 500).presence("vs-04", True, energy=12)
+    c.at(MORNING + 500).presence("vs-04", True, energy=5)
 
     assert c.meal.t0 == MORNING + 100
 

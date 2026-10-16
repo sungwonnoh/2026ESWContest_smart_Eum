@@ -187,7 +187,7 @@ fridge_recent = 0.10
 
 [activity.weights.EATING]
 meal_area_dwell = 0.30
-low_energy = 0.25
+settled = 0.25
 cooking_off_recent = 0.25
 heated_recent = 0.20
 fridge_recent = 0.10
