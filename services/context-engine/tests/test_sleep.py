@@ -277,7 +277,7 @@ def test_no_restore_while_visible(c):
     c.light("vd-02", brightness=70, seq=3)
     before = len(c.cmds())
 
-    c.at(NIGHT + STILL_LIMIT + 30).presence("vs-01", energy=50, seq=3)
+    c.at(NIGHT + STILL_LIMIT + 30).bed("vs-02", occupied=False, seq=2)
 
     assert c.reasons() == ["AWAKE"]
     assert len(c.cmds()) == before
@@ -508,16 +508,37 @@ def test_asleep_after_two_steps(c):
     assert c.sleeps("sleep_start")[0].method == "dim"
 
 
-def test_no_second_step_when_moving(c):
-    """1단계에서 움직이면 더 내리지 않는다."""
+def test_no_second_step_when_responded(c):
+    """응답이 있으면 조명을 더 내리지 않는다.
+
+    옛 이름은 when_moving 이었다. 움직임으로는 더 이상 프로브가
+    취소되지 않는다 — target 에 크기가 없어 뒤척임과 구별되지 않기
+    때문이다 (2026-10-16). 패드 해제가 그 자리를 맡는다.
+    """
     sofa_still(c)
     c.at(NIGHT + STILL_LIMIT + 10)
     before = len(c.cmds())
 
-    c.at(NIGHT + STILL_LIMIT + 30).presence("vs-01", energy=50, seq=3)
+    c.at(NIGHT + STILL_LIMIT + 30).bed("vs-02", occupied=False, seq=2)
 
     assert c.reasons() == ["AWAKE"]
     assert len(c.cmds()) == before
+
+def test_turning_over_does_not_cancel_probe(c):
+    """뒤척임은 깬 것이 아니다.
+
+    target 에는 크기가 없어 뒤척임과 깨어서 손을 쓰는 것이 구별되지
+    않는다. 예전에는 moving_min=40 이 둘을 갈랐지만 energy 를 못 쓰게
+    되면서 사라졌다. 못 가르는 채로 두면 프로브가 매번 취소되어
+    수면이 영영 확정되지 않는다 (2026-10-16).
+    """
+    sofa_still(c)
+    c.at(NIGHT + STILL_LIMIT + 10)
+
+    c.at(NIGHT + STILL_LIMIT + 30).presence("vs-01", energy=50, seq=3)
+
+    assert c.reasons() == []                # AWAKE 가 아니다
+    assert c.runner._probe is not None      # 프로브는 살아 있다
 
 
 def test_probe_base_does_not_ratchet(c):
@@ -526,11 +547,13 @@ def test_probe_base_does_not_ratchet(c):
     sofa_still(c)
     c.at(NIGHT + STILL_LIMIT + 10)
     c.light("vd-02", brightness=70, seq=3)
-    c.at(NIGHT + STILL_LIMIT + 30).presence("vs-01", energy=50, seq=3)
+    c.at(NIGHT + STILL_LIMIT + 30).bed("vs-02", occupied=False, seq=2)
     assert c.reasons() == ["AWAKE"]
+    c.presence("vs-01", energy=50, seq=3)      # 일어나 걸었다 — 정지 시계를 끊는다
 
     gap = 2700
     base = NIGHT + STILL_LIMIT + 30 + gap + 10
+    c.at(base).bed("vs-02", occupied=True, seq=3)      # 다시 앉았다
     c.at(base).presence("vs-01", energy=3, seq=4)
     c.at(base + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=5)
 
