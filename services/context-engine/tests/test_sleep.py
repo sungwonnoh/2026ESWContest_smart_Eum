@@ -52,6 +52,8 @@ class Ctx:
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": seq,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy if present else 0, "distance_cm": 150,
+                        "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
         })
 
     def bed(self, vid: str, occupied: bool, seq: int = 1):
@@ -112,12 +114,23 @@ def c(tmp_path):
     return Ctx(tmp_path)
 
 
+def enters_still(c: Ctx, vid: str, *, energy: int = 3, seq: int = 1):
+    """걸어 들어와 멈춘다.
+
+    STATIC 단독으로는 재실이 시작되지 않는다 (entry_requires_motion).
+    실제로도 사람이 허공에서 정지 상태로 나타나지 않는다.
+    """
+    c.presence(vid, energy=50, seq=seq)
+    return c.presence(vid, energy=energy, seq=seq)
+
+
 def sofa_still(c: Ctx, *, seq: int = 1):
     """소파 패드 + 거실 재실 → IN_SOFA_AWAKE.
 
     TV 가 꺼져 있으므로 프로브는 조명으로 간다. 그래서 조명 state 도
     넣어둔다 — 없으면 프로브 자체가 안 나간다.
     """
+    enters_still(c, "vs-01", seq=seq)
     c.device("vd-01", "smart_tv", power="OFF")
     c.light("vd-02", brightness=100)
     c.bed("vs-02", occupied=True)
@@ -174,7 +187,7 @@ def test_no_probe_in_other_states(c):
 def test_banner_when_tv_on(c):
     """TV 가 켜져 있으면 배너로 묻는다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     assert len(c.pushes()) == 1
@@ -184,7 +197,7 @@ def test_banner_when_tv_on(c):
 def test_banner_does_not_require_ack(c):
     """requires_ack 을 켜면 에스컬레이션이 자는 사람을 음성으로 깨운다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     assert c.pushes()[0]["requires_ack"] is False
@@ -193,7 +206,7 @@ def test_banner_does_not_require_ack(c):
 def test_awake_when_acked(c):
     """[예] 를 누르면 깨어 있는 것이다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     nid = c.pushes()[0]["notify_id"]
@@ -289,7 +302,7 @@ def test_restore_after_lights_off(c):
 def test_asleep_after_timeout(c):
     """무반응이 신호다. 깨어 있으면 누르거나 움직인다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
@@ -302,7 +315,7 @@ def test_asleep_after_timeout(c):
 def test_asleep_records_area(c):
     """어디서 잠들었나 — SLEEP_CONTROL 이 제어 대상을 정한다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -312,7 +325,7 @@ def test_asleep_records_area(c):
 
 def test_decision_payload_shape(c):
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -328,7 +341,7 @@ def test_decision_payload_shape(c):
 def test_no_reprobe_while_asleep(c):
     """확정된 뒤에는 깰 때까지 다시 묻지 않는다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -341,7 +354,7 @@ def test_no_reprobe_while_asleep(c):
 def test_waking_clears_asleep(c):
     """명확한 움직임이 지속되면 깬 것이다. 뒤척임 한 번은 아니다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -363,7 +376,7 @@ def test_probe_suppresses_others(c):
     """프로브 중 다른 알림이 가면 사용자가 그것에 반응하고,
     프로브에도 반응한 것처럼 보여 판정이 망가진다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     s = c.engine.context.suppression
@@ -374,7 +387,7 @@ def test_probe_suppresses_others(c):
 
 def test_probe_ends_after_timeout(c):
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -389,7 +402,7 @@ def test_probe_exempt_from_daily_limit(c):
         c.engine.notifier.limits.note_sent()
 
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     assert len(c.pushes()) == 1
@@ -397,7 +410,7 @@ def test_probe_exempt_from_daily_limit(c):
 
 def test_probe_sets_no_cooldown(c):
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     assert "SLEEP_ROUTINE" not in c.engine.context.suppression.cooldowns
@@ -410,7 +423,7 @@ def test_sleep_start_t0_is_still_since(c):
     """t0 는 확정 시각이 아니라 정지가 시작된 시각이다.
     확정 시각을 쓰면 프로브에 걸린 시간만큼 밀려 분포가 틀어진다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     still_began = c.clock.now()
 
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
@@ -425,7 +438,7 @@ def test_sleep_start_t0_is_still_since(c):
 def test_sleep_start_records_method(c):
     """어떻게 확정했나. 배치가 가중치로 쓴다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -440,7 +453,7 @@ def test_sleep_start_records_method(c):
 def test_sleep_end_logged(c):
     """쌍으로 남긴다. duration 은 배치가 뺀다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -532,7 +545,7 @@ def test_no_channel_waits_longer(c):
     c.device("vd-01", "smart_tv", power="OFF")
     c.light("vd-02", power="OFF", brightness=0)
     c.bed("vs-02", occupied=True)
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
 
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     assert c.runner.asleep is None              # 15분으로는 부족
@@ -547,7 +560,7 @@ def test_no_channel_confidence(c):
     c.device("vd-01", "smart_tv", power="OFF")
     c.light("vd-02", power="OFF", brightness=0)
     c.bed("vs-02", occupied=True)
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + 1800 + 10).presence("vs-01", energy=3, seq=2)
 
     e = c.sleeps("sleep_start")[0]
@@ -561,7 +574,7 @@ def test_no_channel_confidence(c):
 def test_gap_after_awake(c):
     """깨어 있다고 답한 직후에는 다시 묻지 않는다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
 
     nid = c.pushes()[0]["notify_id"]
@@ -583,7 +596,7 @@ def test_resleep_emits_decision(c):
     """화장실에 다녀와 다시 누우면 그것도 발행돼야 한다.
     sleep_end 가 판정을 비우지 않으면 두 번째 확정이 묻힌다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -611,7 +624,7 @@ def test_bed_false_ends_sleep_at_once(c):
     """패드가 가장 확실하다. 지속을 기다리지 않는다."""
     c.device("vd-01", "smart_tv", power="ON")
     c.bed("vs-02", occupied=True)
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -639,7 +652,7 @@ def test_lights_off_on_confirm(c):
 def test_awake_areas_none_at_first(c):
     """재시작 직후에는 직전 sleep_end 를 보지 못했다 — 모른다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -650,7 +663,7 @@ def test_awake_areas_none_at_first(c):
 def test_awake_areas_collects_bathroom(c):
     """화장실에 다녀와 다시 누웠다. 배치가 같은 수면으로 이을 근거다."""
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -664,7 +677,8 @@ def test_awake_areas_collects_bathroom(c):
     c.at(woke + 400).presence("vs-11", present=False, seq=2)
 
     again = woke + 600
-    c.at(again).presence("vs-01", energy=3, seq=6)
+    c.at(again)
+    enters_still(c, "vs-01", seq=6)
     c.at(again + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=7)
     c.at(again + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -678,7 +692,7 @@ def test_awake_areas_empty_when_stayed(c):
     화장실만 다녀온 것과 구별된다 — 배치가 병합 여부를 가르는 근거다.
     """
     c.device("vd-01", "smart_tv", power="ON")
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()
@@ -705,10 +719,11 @@ LEFT = NIGHT + STILL_LIMIT + 300
 
 def asleep_in_living(c: Ctx):
     """TV 배너로 수면 확정. 조명(vd-02)은 프로브가 건드리지 않는다."""
+    enters_still(c, "vs-01")
     c.device("vd-01", "smart_tv", power="ON")
     c.light("vd-02", power="OFF", brightness=0)
     c.bed("vs-02", occupied=True)
-    c.presence("vs-01", energy=3)
+    enters_still(c, "vs-01")
     c.at(NIGHT + STILL_LIMIT + 10).presence("vs-01", energy=3, seq=2)
     c.at(NIGHT + STILL_LIMIT + 10 + PROBE_SEC + 5)
     c.sched.run_due()

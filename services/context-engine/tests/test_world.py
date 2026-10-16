@@ -151,8 +151,13 @@ def sensor(vid: str, **fields) -> tuple[str, dict]:
 
 
 def presence(vid: str, present: bool, energy: int = 50) -> tuple[str, dict]:
-    return sensor(vid, type="presence", present=present,
-                  confidence="high", energy=energy, distance_cm=150)
+    return sensor(
+        vid, type="presence", present=present, confidence="high",
+        energy=energy, distance_cm=150,
+        target=("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+        dist_spread_cm=(5 if energy <= 10 else 90) if present else 0,
+    )
+
 
 
 def power(vid: str, watt: float, state: str | None = None) -> tuple[str, dict]:
@@ -714,6 +719,7 @@ def test_retained_presence_skips_still_since(ctx):
         "version": 1, "sent_ts": 1000, "src_id": "vs-01", "seq": 1,
         "type": "presence", "present": True, "confidence": "high",
         "energy": 3, "distance_cm": 60,
+        "target": "STATIC", "dist_spread_cm": 5,
     })
 
     st = world.sensor("vs-01")

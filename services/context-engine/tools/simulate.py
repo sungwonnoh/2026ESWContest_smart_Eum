@@ -476,9 +476,9 @@ class Simulator:
                     self._publish_event(vid, "remote_input", button="OK")
                     print(f"  {vid} remote_input")
             case "presence":
-                self._presence(args, energy=45)
+                self._presence(args, target="BOTH", spread_cm=90)
             case "still":
-                self._presence(args, energy=3)
+                self._presence(args, target="STATIC", spread_cm=5)
             case "motion":
                 self._motion(args)
             case "bed":
@@ -608,19 +608,13 @@ class Simulator:
         self,
         area: str,
         *,
-        energy: int,
+        energy: int = 100,
         present: bool = True,
         distance_cm: int = 150,
         exclusive: bool = True,
+        target: str = "BOTH",
+        spread_cm: int = 90,
     ) -> str | None:
-        """그 구역에 사람이 있다고 보낸다. 나머지 구역은 비운다.
-
-        사람은 한 명이고 한 곳에만 있다. 다른 구역을 비우지 않으면 엔진이
-        두 명으로 센다 — 실제 mmWave 도 사람이 나가면 스스로 present=false
-        를 올리므로, 비우는 쪽이 하드웨어와 같다.
-
-        exclusive=False 면 그 구역만 건드린다 (2인 상황 테스트).
-        """
         vid = self._sensor_in(area, "presence")
         if vid is None:
             print(f"{area} 에 presence 센서가 없음")
@@ -635,6 +629,7 @@ class Simulator:
                     self._publish_sensor(
                         ovid, present=False, confidence="high",
                         energy=0, distance_cm=0,
+                        target="NONE", dist_spread_cm=0,
                     )
 
         self._publish_sensor(
@@ -643,11 +638,15 @@ class Simulator:
             confidence="high",
             energy=energy if present else 0,
             distance_cm=distance_cm if present else 0,
+            target=target if present else "NONE",
+            dist_spread_cm=spread_cm if present else 0,
         )
         return vid
 
-    def _presence(self, args: list[str], *, energy: int) -> None:
-        """presence <area> [off|keep] — keep 면 다른 구역을 비우지 않는다 (2인 테스트)."""
+    def _presence(
+        self, args: list[str], *, target: str, spread_cm: int
+    ) -> None:
+        """presence <area> [off|keep] — keep 면 다른 구역을 비우지 않는다."""
         if not args:
             print("사용법: presence <area> [off|keep]")
             return
@@ -657,12 +656,14 @@ class Simulator:
         keep = "keep" in flags
 
         vid = self._presence_at(
-            area, energy=energy, present=present, exclusive=not keep
+            area, present=present, exclusive=not keep,
+            target=target, spread_cm=spread_cm,
         )
         if vid is None:
             return
         note = "  (다른 구역 유지)" if keep else ""
-        print(f"  {vid} present={present} energy={energy if present else 0}{note}")
+        print(f"  {vid} present={present} target={target if present else 'NONE'} "
+              f"sp={spread_cm if present else 0}{note}")
 
     def _motion(self, args: list[str]) -> None:
         """motion <area> [off] — PIR. presence 와 다른 경로를 탄다."""
@@ -999,7 +1000,10 @@ class Simulator:
             self._publish_sensor(vid, occupied=False)
         door = self._sensor_of_type("door")
         if door:
-            self._publish_sensor(door, open=True)
+            self._publish_sensor(
+                    vid, present=False, confidence="high",
+                    energy=0, distance_cm=0, target="NONE", dist_spread_cm=0,
+                )
             self._after(1, "현관문 닫힘", lambda: self._publish_sensor(door, open=False))
         print("  전 구역 비움 + 현관 개폐 — door_exit_quiet_sec 뒤 AWAY")
 
@@ -1059,16 +1063,18 @@ class Simulator:
 
         # 주방에 들어가면 나머지 구역은 비워진다 (_presence_at 이 한다).
         # 그러지 않으면 거실이 true 로 남아 엔진이 두 명으로 센다.
-        def pres(energy: int) -> Callable[[], None]:
-            return lambda: self._presence_at("kitchen", energy=energy)
+        def pres(target: str, spread: int) -> Callable[[], None]:
+            return lambda: self._presence_at(
+                "kitchen", target=target, spread_cm=spread
+            )
 
-        self._after(0, "주방 입장", pres(45))
+        self._after(0, "주방 입장", pres("BOTH", 90))
         self._after(2, "인덕션 ON → COOKING", lambda: self._publish_sensor(
             induction, watt=1200.0, state="ON"))
         self._after(20, "인덕션 OFF", lambda: self._publish_sensor(
             induction, watt=2.0, state="OFF"))
         self._after(23, "냉장고 열고 닫기", self._fridge_cycle)
-        self._after(26, "주방 체류 저에너지 → EATING", pres(5))
+        self._after(26, "주방 체류 정지 → EATING", pres("STATIC", 5))
         self._after(50, "주방 이탈", lambda: self._publish_sensor(
             kitchen, present=False, confidence="high", energy=0, distance_cm=0))
         self._after(52, "거실로", lambda: self._presence_at("living", energy=45))
@@ -1096,11 +1102,11 @@ class Simulator:
 
         # 입장이 나머지 구역을 비운다 — 따로 '거실 비움' 단계가 필요 없다
         self._after(0, "침실 입장", lambda: self._presence_at(
-            "bedroom", energy=45, distance_cm=120))
+            "bedroom", distance_cm=120, target="BOTH", spread_cm=90))
         if pad:
             self._after(3, "침대 점유", lambda: self._publish_sensor(pad, occupied=True))
-        self._after(5, "정지 시작 (energy 바닥)", lambda: self._presence_at(
-            "bedroom", energy=2, distance_cm=120))
+        sself._after(5, "정지 시작", lambda: self._presence_at(
+            "bedroom", distance_cm=120, target="STATIC", spread_cm=3))
         self._after(
             45,
             "프로브 발동 대기 — 조명이 켜져 있으면 dim, 아니면 60초 정지로 확정",
@@ -1149,9 +1155,9 @@ class Simulator:
             print("화장실 presence 센서가 없음")
             return
         self._after(0, "화장실 입장", lambda: self._presence_at(
-            "bathroom", energy=45, distance_cm=100))
-        self._after(3, "정지 — energy 바닥", lambda: self._presence_at(
-            "bathroom", energy=2, distance_cm=100))
+            "bathroom", distance_cm=100, target="BOTH", spread_cm=90))
+        self._after(3, "정지", lambda: self._presence_at(
+            "bathroom", distance_cm=100, target="STATIC", spread_cm=2))
         self._after(40, "30초 정지 — SAFETY 알림이 나와야 한다", lambda: None)
 
     # ------------------------------------------------------------ 출력
@@ -1193,9 +1199,10 @@ HELP = """
   remote                   TV 리모컨 입력 이벤트
 
 센서
-  presence <area> [off|keep]  재실 (energy 45). 나머지 구역은 비워진다
+  presence <area> [off|keep]  재실, 움직임 (target=BOTH sp=90)
+                                나머지 구역은 비워진다
                                 keep 를 주면 안 비운다 — 2인 상황 테스트용
-  still <area> [keep]      정지 (energy 3) — 낙상·수면 판정용
+  still <area> [keep]      재실, 정지 (target=STATIC sp=5) — 낙상·수면·식사
   motion <area> [off]      PIR
   bed [area] [off]         압력 패드
   door [open|close]        현관문

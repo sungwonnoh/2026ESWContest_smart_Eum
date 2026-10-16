@@ -131,6 +131,7 @@ def check_envelope(payload: dict, recv_ts: float, expected_src: str) -> dict:
 
 CONFIDENCE = frozenset({"high", "medium", "low"})
 POWER_STATE = frozenset({"OFF", "STANDBY", "ON"})
+TARGET = frozenset({"NONE", "MOVING", "STATIC", "BOTH"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +142,8 @@ class PresenceMessage(SensorMessage):
     confidence: str = "high"
     energy: int = 0
     distance_cm: int = 0
+    target: str | None = None          # NONE / MOVING / STATIC / BOTH. 없으면 모름
+    dist_spread_cm: int | None = None  # 최근 10초 거리 변동폭(cm). 없으면 모름
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +200,8 @@ def parse_sensor(payload: dict, base: dict) -> SensorMessage:
                 confidence=_one_of(payload, "confidence", CONFIDENCE) or "high",
                 energy=_opt(payload, "energy", int, 0),
                 distance_cm=_opt(payload, "distance_cm", int, 0),
+                target=_one_of(payload, "target", TARGET, required=False),
+                dist_spread_cm=_opt(payload, "dist_spread_cm", int),
             )
         case "motion":
             return MotionMessage(
