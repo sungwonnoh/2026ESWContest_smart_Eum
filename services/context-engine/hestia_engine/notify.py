@@ -714,13 +714,12 @@ class Notifier:
 
     def _comply_movement(self, n: PendingNotify) -> tuple[bool, str | None, float | None]:
         """정지가 풀렸는가. '괜찮으신가요' 에 대한 응답은 움직임이다.
-
-        still_sec 이 0 이면 지금 움직이는 중이고, 발송 시점보다 짧으면 한 번 끊겼다가 다시 멈춘 것이다. (어느 쪽이든 그 사이에 움직였다는 뜻)
-
-        delay_sec 은 알 수 없다 — 언제 움직였는지가 아니라 '지금 움직이고 있나' 만 보이기 때문
         """
         if n.comply_area is None:
             return False, None, None
+
+        if n.closed_reason == CLOSED_RESOLVED and n.closed_at is not None:
+            return True, f"movement:{n.comply_area}", round(n.closed_at - n.sent_at)
 
         still = self._world.still_sec(n.comply_area)
         if still == 0.0:

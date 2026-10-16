@@ -60,8 +60,8 @@ class PresenceState(SensorState):
     distance_cm: int = 0
     changed_at: float = 0.0        # present 전환 시각
     prev_present: bool | None = None   # 전환 직전의 present. 첫 메시지면 None
-    still_since: float | None = None   # energy 가 임계 아래로 내려간 시각
-    moving_since: float | None = None  # energy 가 moving_min 위로 올라간 시각
+    still_since: float | None = None   # dist_spread_cm 이 settle_spread_max_cm 아래로 내려간 시각
+    moving_since: float | None = None  # target 에 이동 성분이 생긴 시각
     target: str | None = None          # NONE / MOVING / STATIC / BOTH
     dist_spread_cm: int | None = None  # 최근 10초 거리 변동폭
     settled: bool = False
@@ -499,6 +499,18 @@ class WorldState:
             if isinstance(s, PresenceState) and s.present and s.still_since is not None #사람이 있지만, 정지중
         ]
         return max(spans) if spans else 0.0
+
+    def moving_since(self, area: str) -> float | None:
+        """그 구역에서 이동 성분이 끊기지 않고 이어진 시작 시각.
+
+        끊기면 None 으로 돌아가고 다시 시작하면 새 시각이 들어간다.
+        """
+        spans = [
+            s.moving_since
+            for s in self.sensors_of(area)
+            if isinstance(s, PresenceState) and s.present and s.moving_since is not None
+        ]
+        return min(spans) if spans else None
 
     def power_state(self, vid: str) -> str:
         st = self.sensors.get(vid)
