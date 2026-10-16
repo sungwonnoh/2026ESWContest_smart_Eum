@@ -221,10 +221,10 @@ class ActivityEvaluator:
                 eating = 0.0
                 if dwell >= dwell_need:
                     eating += w("EATING", "meal_area_dwell")
-                if self._low_energy_in(meal_areas):
+                if self._settled_in(meal_areas):
                     # 설거지와 가르는 신호다. 머무는 것만으로는
                     # 서서 치우는 것과 구별되지 않는다.
-                    eating += w("EATING", "low_energy")
+                    eating += w("EATING", "settled")
                 if off_sec is not None and gap_need <= off_sec <= off_window:
                     eating += w("EATING", "cooking_off_recent")
                 if heat_sec is not None and heat_sec <= heat_window:
@@ -382,13 +382,17 @@ class ActivityEvaluator:
                 best = gap if best is None else min(best, gap)
         return best
 
-    def _low_energy_in(self, areas: tuple[str, ...]) -> bool:
-        return any(self._low_energy(a) for a in areas)
+    def _settled_in(self, areas: tuple[str, ...]) -> bool:
+        return any(self._settled(a) for a in areas)
 
-    def _low_energy(self, area: str) -> bool:
-        active_min = float(self._config.value("presence", "energy", "active_min", default=30))
+    def _settled(self, area: str) -> bool:
+        """한 자리에 앉아 있는가. 거리 변동폭이 작다는 뜻이다.
+
+        energy 는 못 쓴다 — max(이동, 정지) 라서 앉아 있어도 100 이고
+        낮은 값은 떠나는 8초 동안만 나온다 (2026-10-16 실측).
+        """
         return any(
-            isinstance(st, PresenceState) and st.present and st.energy < active_min
+            isinstance(st, PresenceState) and st.present and st.settled
             for st in self._world.sensors_of(area)
         )
 
