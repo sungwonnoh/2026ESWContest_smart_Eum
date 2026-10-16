@@ -62,6 +62,12 @@ class PresenceState(SensorState):
     prev_present: bool | None = None   # 전환 직전의 present. 첫 메시지면 None
     still_since: float | None = None   # energy 가 임계 아래로 내려간 시각
     moving_since: float | None = None  # energy 가 moving_min 위로 올라간 시각
+    target: str | None = None          # NONE / MOVING / STATIC / BOTH
+    dist_spread_cm: int | None = None  # 최근 10초 거리 변동폭
+
+    def is_moving(self) -> bool:
+        """이동 성분이 있는가. 사물은 절대 참이 되지 않는다."""
+        return self.target in ("MOVING", "BOTH")
 
     def state_sec(self, now: float) -> float:
         return now - self.changed_at    #현재 present 값이 유지된 시간 (재실 지속은 WorldState.dwell_sec)
@@ -314,17 +320,22 @@ class WorldState:
 
         st.energy = msg.energy
         st.distance_cm = msg.distance_cm
+        st.target = msg.target
+        st.dist_spread_cm = msg.dist_spread_cm
 
-        still_max = float(self._config.value("presence", "energy", "still_max", default=10))
-        moving_min = float(self._config.value("presence", "energy", "moving_min", default=40))
+        spread_max = float(
+            self._config.value("presence", "settle_spread_max_cm", default=40)
+        )
+        spread = msg.dist_spread_cm
+        settled = msg.present and spread is not None and spread < spread_max
 
-        if msg.present and msg.energy <= still_max:     #사람은 있는데 안 움직임 (mmWave 는 정지한 사람도 감지)
+        if settled:
             if st.still_since is None and changed_ts is not None:
                 st.still_since = changed_ts
         else:
             st.still_since = None
 
-        if msg.present and msg.energy >= moving_min:
+        if msg.present and st.is_moving():
             if st.moving_since is None and changed_ts is not None:
                 st.moving_since = changed_ts
         else:

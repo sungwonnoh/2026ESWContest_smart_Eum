@@ -49,15 +49,16 @@ min_hold_sec = 10
 #   PIR   (low)  — 정지한 사람을 놓치므로 무반응 N분 후 이석 판정
 
 [presence]
-mmwave_absent_grace_sec = 30      # mmWave present=false 후 이 시간 뒤 이석 확정
-pir_absent_timeout_sec = 300      # PIR 무반응이 이만큼 지속되면 이석 판정
-area_switch_min_sec = 20          # 구역 전환 최소 지속 (오가는 떨림 방지)
+entry_requires_motion = true      # STATIC 단독으로는 재실을 시작하지 못한다
+settle_spread_max_cm  = 40        # 이 미만이면 정지. 2026-10-16 실측 (앉음 ≤32 / 걷기 ≥45)
 
 # mmWave energy 임계 — 명세: "정지/미세움직임 판정은 노드가 아니라 RPi5 가"
 [presence.energy]
-still_max = 10                    # 이 이하면 정지
-active_min = 30                   # 이 밑이면 저에너지 (식사·착석 판정)
-moving_min = 40      # 이 위로 지속되면 깬 것 (뒤척임과 구별)
+# 2026-10-16 실측으로 폐기. energy = max(이동, 정지) 라서 앉아 있어도 100 이고,
+# 낮은 값은 사람이 떠나는 8초 동안만 나온다 — 신호가 거꾸로였다.
+# still_max  = 10
+# active_min = 30
+# moving_min = 40
 
 # 근거별 확신도.
 #
