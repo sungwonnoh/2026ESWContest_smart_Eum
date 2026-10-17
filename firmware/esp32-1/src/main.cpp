@@ -12,6 +12,7 @@
 #include "inventory.h"      
 #include "sensors.h"
 #include "devices.h"
+#include "sensors/button.h"
 
 static const char* displayId_ = nullptr;         // setup 에서 결정
 
@@ -30,6 +31,8 @@ static uint32_t lastHeartbeat = 0;
 static uint32_t lastDeviceState = 0;
 
 static const uint32_t DEVICE_STATE_MS = 300000;   // 5분
+
+static ButtonPin ackBtn_;
 
 // ── 발행 ─────────────────────────────────────
 static void publishStatus() {
@@ -271,6 +274,11 @@ void setup() {
 
     consoleBegin(onConsoleLine);
 
+    #ifdef ACK_BUTTON_PIN
+    buttonAttach(ackBtn_, ACK_BUTTON_PIN);
+    logInfo("BOOT", "ack button pin=%d", ACK_BUTTON_PIN);
+    #endif
+
     if (displayId_ != nullptr) {
         logInfo("BOOT", "display_node = %s", displayId_);
     }
@@ -299,6 +307,18 @@ void loop() {
 
     mqtt.tick();
     consoleTick();
+
+    #ifdef ACK_BUTTON_PIN
+    if (buttonPressed(ackBtn_)) {
+        // 콘솔의 seen 과 같은 길. isForMe 로 걸러 들어온 것만 들고 있다
+        const hestia::NotifyPush* top = notifies.latest();
+        if (top != nullptr) {
+            publishAck(top->notify_id, hestia::ACK_SEEN);
+        } else {
+            logInfo("BTN", "ack pressed — no active notify");
+        }
+    }
+    #endif
 
     bool mqttUp = mqtt.isConnected();
     bool tsChanged = timeSyncTick();
