@@ -11,9 +11,18 @@ cmd 를 받을 수 없어서, 제어가 먹혔는지 확인할 방법이 없다.
 엔진이 내보내는 것(context, 알림, 판정, t0 로그)도 함께 구독해 찍는다 —
 쏘기만 하고 결과를 못 보면 터미널 두 개를 번갈아 봐야 한다.
 
+센서 값은 센서가 보내는 그대로 적는다. 시뮬레이터가 대신 고르지 않는다 —
+'still' 이 energy=3 을 끼워 넣어서, 맥에서는 EATING 이 뜨고 실물에서는
+안 뜨던 일이 있었다 (2026-10-16). 편의 계층이 버그를 숨긴다.
+
 재실은 배타적이다. 사람은 한 명이고 한 곳에만 있으므로, 어느 구역을
 켜면 나머지 구역을 비운다 — 실제 mmWave 도 사람이 나가면 스스로
-present=false 를 올린다. 두 명을 만들어 보려면 'presence <area> keep'.
+present=false 를 올린다. 두 명을 만들어 보려면 끝에 'keep'.
+
+presence 는 20초마다 저절로 다시 나간다 (펌웨어 PERIOD_MS 와 같다).
+그게 없으면 손으로 쏠 때만 엔진이 깨어나, dwell·still_sec 같은
+지속 임계값이 시각이 지나도 안 걸린다 — activity.py 가 거기에
+타이머를 예약하지 않기 때문이다. 'heartbeat off' 로 끌 수 있다.
 
 점진 변화는 중간값을 보내지 않는다 — transition_ms 만큼 기다렸다가
 최종값 하나만 발행한다. 실제 기기도 대개 그렇고, 중간값이 오면
@@ -65,6 +74,12 @@ ACTION_EFFECT = {
 
 TRANSITION_KEY = "transition_ms"
 
+# mmWave 가 보고하는 타깃 상태 (LD2410). 사물은 STATIC 까지만 만든다.
+TARGETS = ("NONE", "MOVING", "STATIC", "BOTH")
+
+TRUE_WORDS = ("true", "t", "1", "on", "yes", "y")
+FALSE_WORDS = ("false", "f", "0", "off", "no", "n")
+
 # 엔진이 내보내는 것들. 구독해서 찍는다.
 WATCH_TOPICS = [
     ("hestia/context/+", 1),
@@ -78,6 +93,28 @@ WATCH_TOPICS = [
 
 GRID_STEP = 15
 GRID_N = 1440 // GRID_STEP
+
+USAGE_PRESENCE = """사용법: presence <area> <true|false> [target] [sp] [d=N] [keep]
+  present 가 true 면 target 과 sp 를 반드시 적는다 (기본값을 끼워 넣지 않는다)
+    target  NONE | MOVING | STATIC | BOTH
+    sp      dist_spread_cm — 최근 10초 거리 변동폭
+    d=N     distance_cm (기본 150)
+    keep    다른 구역을 비우지 않는다 — 2인 상황 테스트용
+  예)
+    presence kitchen true BOTH 90      걸어 들어옴
+    presence kitchen true BOTH 30      앉아서 식사 — 팔은 움직이고 자리는 그대로
+    presence bedroom true STATIC 3     완전 정지 — 자는 사람·쓰러진 사람
+    presence kitchen false             이탈 (NONE / 0 으로 나간다)"""
+
+
+def _as_bool(token: str) -> bool | None:
+    """true/false 를 읽는다. on/off, 1/0 도 받는다 — 손이 기억하는 말들이다."""
+    t = token.lower()
+    if t in TRUE_WORDS:
+        return True
+    if t in FALSE_WORDS:
+        return False
+    return None
 
 
 class Simulator:
@@ -108,6 +145,11 @@ class Simulator:
         self._fridge_opened_at: float | None = None
         self._lux_base: float = 100.0      # lux 명령이 준 '조명을 뺀' 바닥 조도
 
+        # 마지막으로 쏜 presence 값. 실제 노드처럼 주기적으로 다시 쏜다
+        self._presence_last: dict[str, dict[str, Any]] = {}
+        self._hb_period: float = 20.0      # 펌웨어 PERIOD_MS 와 같은 역할
+        self._hb_next: float = time.time() + 20.0
+
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
         )
@@ -131,10 +173,14 @@ class Simulator:
             print(f"브로커 연결 실패: {exc}")
             return
 
-        print(f"브로커 {self._host}:{self._port} — help 로 명령 목록")
+        print(
+            f"브로커 {self._host}:{self._port} — help 로 명령 목록"
+            f"\npresence 하트비트 {self._hb_period:g}초 (heartbeat off 로 끔)"
+        )
         while self._running:
             self._client.loop(timeout=0.1)
             self._apply_due()
+            self._run_heartbeat()
             self._run_script()
             self._drain_input()
 
@@ -316,6 +362,48 @@ class Simulator:
             print(f"  전환 완료 {vid} {params}")
             self._set(vid, **params)
 
+    # ------------------------------------------------------------ 하트비트
+
+    def _run_heartbeat(self) -> None:
+        """실제 노드처럼 주기적으로 같은 presence 값을 다시 쏜다.
+
+        펌웨어 PERIOD_MS 와 같은 역할이다. 이게 없으면 손으로 쏠 때만
+        엔진이 깨어나, dwell·still_sec 같은 지속 임계값이 시각이 지나도
+        안 걸린다 — activity.py 가 거기에 타이머를 예약하지 않는다.
+
+        조용하다. _publish_sensor 는 찍지 않고, context 는 바뀔 때만
+        찍히므로 화면이 지저분해지지 않는다.
+        """
+        if self._hb_period <= 0 or not self._presence_last:
+            return
+        now = time.time()
+        if now < self._hb_next:
+            return
+        self._hb_next = now + self._hb_period
+        for vid, fields in self._presence_last.items():
+            self._publish_sensor(vid, **fields)
+
+    def _heartbeat(self, args: list[str]) -> None:
+        """heartbeat [초|off] — presence 재발행 주기. 기본 20초."""
+        if args:
+            if args[0].lower() in ("off", "0"):
+                self._hb_period = 0.0
+                print("  하트비트 꺼짐 — 손으로 쏠 때만 엔진이 깨어난다")
+                return
+            try:
+                self._hb_period = float(args[0])
+            except ValueError:
+                print("사용법: heartbeat [초|off]")
+                return
+        if self._hb_period <= 0:
+            print("  하트비트 꺼짐")
+            return
+        self._hb_next = time.time() + self._hb_period
+        print(
+            f"  하트비트 {self._hb_period:g}초 — "
+            f"presence {len(self._presence_last)}개 재발행"
+        )
+
     # ------------------------------------------------------------ 발행
 
     def _set(self, vid: str, **changes: Any) -> None:
@@ -426,6 +514,12 @@ class Simulator:
     def _sensors_of_type(self, stype: str) -> list[str]:
         return [s.id for s in self._config.all_sensors() if s.type == stype and s.enabled]
 
+    def _spread_max(self) -> float:
+        """settled 임계값. 출력에 [정지]/[이동] 을 붙이는 데 쓴다."""
+        return float(
+            self._config.value("presence", "settle_spread_max_cm", default=40)
+        )
+
     # ------------------------------------------------------------ 입력
 
     def _read_input(self) -> None:
@@ -476,9 +570,7 @@ class Simulator:
                     self._publish_event(vid, "remote_input", button="OK")
                     print(f"  {vid} remote_input")
             case "presence":
-                self._presence(args, target="BOTH", spread_cm=90)
-            case "still":
-                self._presence(args, target="STATIC", spread_cm=5)
+                self._presence(args)
             case "motion":
                 self._motion(args)
             case "bed":
@@ -491,6 +583,8 @@ class Simulator:
                 self._climate(args)
             case "lux":
                 self._lux(args)
+            case "heartbeat" | "hb":
+                self._heartbeat(args)
             case "model":
                 self._model(args)
             case "med":
@@ -604,17 +698,36 @@ class Simulator:
 
     # ------------------------------------------------------------ 센서 명령
 
+    def _emit_presence(self, vid: str, fields: dict[str, Any]) -> None:
+        """presence 한 발을 쏘고 하트비트용으로 기억한다.
+
+        손으로 쏜 직후에는 하트비트를 미룬다 — 펌웨어도 changed 와
+        PERIOD_MS 중 먼저 오는 쪽으로 발행한다.
+
+        센서별로 마지막 값 하나만 들고 있다. 배타성 쓸이가 다른 구역을
+        false 로 덮으면 그 값이 기억되므로, 하트비트가 옛 재실을
+        되살리지 않는다.
+        """
+        self._presence_last[vid] = fields
+        self._hb_next = time.time() + self._hb_period
+        self._publish_sensor(vid, **fields)
+
     def _presence_at(
         self,
         area: str,
         *,
-        energy: int = 100,
         present: bool = True,
-        distance_cm: int = 150,
-        exclusive: bool = True,
         target: str = "BOTH",
         spread_cm: int = 90,
+        distance_cm: int = 150,
+        exclusive: bool = True,
     ) -> str | None:
+        """mmWave 한 발. 매크로와 입력 명령이 함께 쓰는 내부 경로다.
+
+        energy 는 present 면 100 으로 고정한다. 실물에서 energy 는
+        max(이동, 정지) 라서 앉아 있어도 100 이고(2026-10-16 실측),
+        엔진의 판정에서는 쓰이지 않는다 — factors 기록용만 남았다.
+        """
         vid = self._sensor_in(area, "presence")
         if vid is None:
             print(f"{area} 에 presence 센서가 없음")
@@ -626,88 +739,166 @@ class Simulator:
                     continue
                 ovid = self._sensor_in(other, "presence")
                 if ovid is not None:
-                    self._publish_sensor(
-                        ovid, present=False, confidence="high",
-                        energy=0, distance_cm=0,
-                        target="NONE", dist_spread_cm=0,
-                    )
+                    self._emit_presence(ovid, {
+                        "present": False, "confidence": "high",
+                        "energy": 0, "distance_cm": 0,
+                        "target": "NONE", "dist_spread_cm": 0,
+                    })
 
-        self._publish_sensor(
-            vid,
-            present=present,
-            confidence="high",
-            energy=energy if present else 0,
-            distance_cm=distance_cm if present else 0,
-            target=target if present else "NONE",
-            dist_spread_cm=spread_cm if present else 0,
-        )
+        self._emit_presence(vid, {
+            "present": present,
+            "confidence": "high",
+            "energy": 100 if present else 0,
+            "distance_cm": distance_cm if present else 0,
+            "target": target if present else "NONE",
+            "dist_spread_cm": spread_cm if present else 0,
+        })
         return vid
 
-    def _presence(
-        self, args: list[str], *, target: str, spread_cm: int
-    ) -> None:
-        """presence <area> [off|keep] — keep 면 다른 구역을 비우지 않는다."""
-        if not args:
-            print("사용법: presence <area> [off|keep]")
+    def _presence(self, args: list[str]) -> None:
+        """presence <area> <true|false> [target] [sp] [d=N] [keep]
+
+        present 가 참이면 target 과 sp 를 반드시 적는다. 시뮬레이터가
+        대신 고르지 않는다 — 옛 'still' 이 energy=3 을 끼워 넣어서
+        맥에서만 EATING 이 뜨던 일이 있었다 (2026-10-16).
+
+        부재면 뒤를 적지 않는다. 펌웨어도 부재면 target=NONE,
+        dist_spread_cm=0 을 보낸다 (ld2410.cpp 의 'dist = next ? ... : 0').
+        """
+        if len(args) < 2:
+            print(USAGE_PRESENCE)
             return
+
         area = args[0]
-        flags = [a.lower() for a in args[1:]]
-        present = "off" not in flags
-        keep = "keep" in flags
+        pos: list[str] = []
+        flags: list[str] = []
+        for a in args[1:]:
+            (flags if ("=" in a or a.lower() == "keep") else pos).append(a)
+
+        present = _as_bool(pos[0]) if pos else None
+        if present is None:
+            print(USAGE_PRESENCE)
+            return
+
+        keep = any(f.lower() == "keep" for f in flags)
+        distance = 150
+        for f in flags:
+            if "=" not in f:
+                continue
+            key, value = f.split("=", 1)
+            if key.lower() not in ("d", "dist", "distance"):
+                print(f"모르는 옵션: {f}")
+                return
+            try:
+                distance = int(value)
+            except ValueError:
+                print(f"거리가 숫자가 아님: {f}")
+                return
+
+        if not present:
+            if len(pos) > 1:
+                print("부재에는 target·sp 를 적지 않는다 — NONE / 0 으로 나간다")
+                return
+            vid = self._presence_at(area, present=False, exclusive=not keep)
+            if vid is not None:
+                print(f"  {vid} present=false target=NONE sp=0")
+            return
+
+        if len(pos) < 3:
+            print(USAGE_PRESENCE)
+            return
+
+        target = pos[1].upper()
+        if target not in TARGETS:
+            print(f"target 은 {' | '.join(TARGETS)}")
+            return
+        try:
+            spread = int(pos[2])
+        except ValueError:
+            print("sp (dist_spread_cm) 가 숫자가 아님")
+            return
 
         vid = self._presence_at(
-            area, present=present, exclusive=not keep,
-            target=target, spread_cm=spread_cm,
+            area, present=True, exclusive=not keep,
+            target=target, spread_cm=spread, distance_cm=distance,
         )
         if vid is None:
             return
+
+        mark = "정지" if spread < self._spread_max() else "이동"
         note = "  (다른 구역 유지)" if keep else ""
-        print(f"  {vid} present={present} target={target if present else 'NONE'} "
-              f"sp={spread_cm if present else 0}{note}")
+        print(
+            f"  {vid} present=true target={target} sp={spread} d={distance} "
+            f"[{mark}]{note}"
+        )
 
     def _motion(self, args: list[str]) -> None:
-        """motion <area> [off] — PIR. presence 와 다른 경로를 탄다."""
-        if not args:
-            print("사용법: motion <area> [off]")
+        """motion <area> <true|false> — PIR. presence 와 다른 경로를 탄다."""
+        if len(args) < 2:
+            print("사용법: motion <area> <true|false>")
             return
         area = args[0]
         vid = self._sensor_in(area, "motion")
         if vid is None:
             print(f"{area} 에 motion 센서가 없음")
             return
-        on = len(args) < 2 or args[1] != "off"
+        on = _as_bool(args[1])
+        if on is None:
+            print("사용법: motion <area> <true|false>")
+            return
         self._publish_sensor(vid, motion=on, confidence="low")
-        print(f"  {vid} motion={on}")
+        print(f"  {vid} motion={str(on).lower()}")
 
     def _bed(self, args: list[str]) -> None:
-        """bed [area] [off] — area 를 주면 그 구역 압력 패드."""
+        """bed [area] <true|false> — 압력 패드. 패드가 하나면 area 생략."""
+        if not args:
+            print("사용법: bed [area] <true|false>")
+            return
+
         area = None
-        if args and args[0] in self._config.areas:
+        if args[0] in self._config.areas:
             area, args = args[0], args[1:]
+        if not args:
+            print("사용법: bed [area] <true|false>")
+            return
 
         if area is None:
             pads = self._sensors_of_type("bed")
             if len(pads) > 1:
                 where = " | ".join(self._config.sensor(v).area for v in pads)
-                print(f"  침대 패드가 여럿이다 — 구역을 적어라: bed <{where}>")
+                print(f"  패드가 여럿이다 — 구역을 적어라: bed <{where}> <true|false>")
                 return
 
         vid = self._sensor_in(area, "bed") if area else self._sensor_of_type("bed")
         if vid is None:
             print(f"bed 센서가 없음{f' ({area})' if area else ''}")
             return
-        occupied = not args or args[0] != "off"
+
+        occupied = _as_bool(args[0])
+        if occupied is None:
+            print("사용법: bed [area] <true|false>")
+            return
         self._publish_sensor(vid, occupied=occupied)
-        print(f"  {vid} ({self._config.sensor(vid).area}) occupied={occupied}")
+        print(
+            f"  {vid} ({self._config.sensor(vid).area}) "
+            f"occupied={str(occupied).lower()}"
+        )
 
     def _door(self, args: list[str]) -> None:
+        """door <true|false> — 현관문. true = 열림."""
         vid = self._sensor_of_type("door")
         if vid is None:
             print("door 센서가 없음")
             return
-        opened = bool(args) and args[0] == "open"
+        if not args:
+            print("사용법: door <true|false>")
+            return
+        opened = _as_bool(args[0])
+        if opened is None:
+            print("사용법: door <true|false>")
+            return
         self._publish_sensor(vid, open=opened)
-        print(f"  {vid} open={opened}")
+        print(f"  {vid} open={str(opened).lower()}")
 
     def _power(self, args: list[str]) -> None:
         if len(args) < 2:
@@ -980,30 +1171,29 @@ class Simulator:
             self._client.publish(t, b"", qos=1, retain=True)
         print(f"  retained {len(topics)}건 삭제")
 
+        for vid in self.devices:
+            self._publish_state(vid)
+        print(f"  가전 {len(self.devices)}대 상태 재발행")
+
     # ------------------------------------------------------------ 묶음 명령
 
     def _home(self) -> None:
-        """집에 있는 상태로 되돌린다 — 거실 재실, 나머지 비움."""
-        if self._presence_at("living", energy=45) is None:
+        """집에 있는 상태로 되돌린다 — 거실 재실(걷는 중), 나머지 비움."""
+        if self._presence_at("living", target="BOTH", spread_cm=90) is None:
             return
-        print("  거실 재실, 나머지 구역 비움")
+        print("  거실 재실 (BOTH sp=90), 나머지 구역 비움")
 
     def _out(self) -> None:
         """전 구역을 비운다. 현관문까지 여닫아 door_exit 근거를 만든다."""
         for area in self._config.areas:
-            vid = self._sensor_in(area, "presence")
-            if vid:
-                self._publish_sensor(
-                    vid, present=False, confidence="high", energy=0, distance_cm=0
-                )
+            if self._sensor_in(area, "presence") is not None:
+                self._presence_at(area, present=False)
         for vid in self._sensors_of_type("bed"):
             self._publish_sensor(vid, occupied=False)
+
         door = self._sensor_of_type("door")
-        if door:
-            self._publish_sensor(
-                    vid, present=False, confidence="high",
-                    energy=0, distance_cm=0, target="NONE", dist_spread_cm=0,
-                )
+        if door is not None:
+            self._publish_sensor(door, open=True)
             self._after(1, "현관문 닫힘", lambda: self._publish_sensor(door, open=False))
         print("  전 구역 비움 + 현관 개폐 — door_exit_quiet_sec 뒤 AWAY")
 
@@ -1051,14 +1241,20 @@ class Simulator:
         """조리 → 식사 → 이탈 → 묶음 종료 → 식후 복약.
 
         config-test 기준: close_grace 20초, min_duration 15초.
+
+        식사 자세를 BOTH sp=30 으로 쏜다. 실물에서 식사는 팔이 움직여
+        target 이 BOTH 이고, 자리를 안 옮겨 sp 가 작다 — STATIC 으로
+        쏘면 실물과 다른 것을 확인하게 된다 (2026-10-16).
         """
-        kitchen = self._sensor_in("kitchen", "presence")
+        if self._sensor_in("kitchen", "presence") is None:
+            print("주방 presence 센서가 없음")
+            return
         induction = next(
             (s.id for s in self._config.all_sensors()
              if s.type == "power" and "MEAL" in s.roles), None
         )
-        if kitchen is None or induction is None:
-            print("주방 presence 또는 인덕션 전력 센서가 없음")
+        if induction is None:
+            print("인덕션 전력 센서가 없음 (role=MEAL)")
             return
 
         # 주방에 들어가면 나머지 구역은 비워진다 (_presence_at 이 한다).
@@ -1068,19 +1264,19 @@ class Simulator:
                 "kitchen", target=target, spread_cm=spread
             )
 
-        self._after(0, "주방 입장", pres("BOTH", 90))
+        self._after(0, "주방 입장 (BOTH sp=90)", pres("BOTH", 90))
         self._after(2, "인덕션 ON → COOKING", lambda: self._publish_sensor(
             induction, watt=1200.0, state="ON"))
         self._after(20, "인덕션 OFF", lambda: self._publish_sensor(
             induction, watt=2.0, state="OFF"))
         self._after(23, "냉장고 열고 닫기", self._fridge_cycle)
-        self._after(26, "주방 체류 정지 → EATING", pres("STATIC", 5))
-        self._after(50, "주방 이탈", lambda: self._publish_sensor(
-            kitchen, present=False, confidence="high", energy=0, distance_cm=0))
-        self._after(52, "거실로", lambda: self._presence_at("living", energy=45))
+        self._after(26, "앉아서 식사 (BOTH sp=30) → EATING", pres("BOTH", 30))
+        self._after(50, "주방 이탈", lambda: self._presence_at(
+            "kitchen", present=False))
+        self._after(52, "거실로", self._home)
         self._after(
             80,
-            "묶음 종료 대기 — grace 20초 뒤 log/t0, 다시 1분 뒤 복약 알림",
+            "묶음 종료 대기 — grace 뒤 log/t0, 다시 1분 뒤 복약 알림",
             lambda: None,
         )
 
@@ -1094,6 +1290,9 @@ class Simulator:
 
         config-test 기준: probe_still 30초, no_channel 60초, timeout 10초.
         침실 조명을 켜두면 dim 프로브, 꺼두면 긴 정지만으로 확정한다.
+
+        프로브에 "깨어 있다"고 답하려면 'bed bedroom false' 다.
+        움직임으로는 안 깨진다 (scenarios._responded, 2026-10-16).
         """
         if self._sensor_in("bedroom", "presence") is None:
             print("침실 presence 센서가 없음")
@@ -1101,11 +1300,11 @@ class Simulator:
         pad = self._sensor_in("bedroom", "bed")
 
         # 입장이 나머지 구역을 비운다 — 따로 '거실 비움' 단계가 필요 없다
-        self._after(0, "침실 입장", lambda: self._presence_at(
+        self._after(0, "침실 입장 (BOTH sp=90)", lambda: self._presence_at(
             "bedroom", distance_cm=120, target="BOTH", spread_cm=90))
         if pad:
             self._after(3, "침대 점유", lambda: self._publish_sensor(pad, occupied=True))
-        sself._after(5, "정지 시작", lambda: self._presence_at(
+        self._after(5, "정지 시작 (STATIC sp=3)", lambda: self._presence_at(
             "bedroom", distance_cm=120, target="STATIC", spread_cm=3))
         self._after(
             45,
@@ -1150,13 +1349,17 @@ class Simulator:
         """화장실 재실 → 정지 → 낙상 판정.
 
         config-test 기준: still_sec 30초.
+
+        알림에 "괜찮다"고 답하려면 움직임을 쏜다 —
+        'presence bathroom true BOTH 90'. 발송 뒤에 시작된 이동 성분만
+        응답으로 인정된다 (notify._comply_movement, 2026-10-16).
         """
         if self._sensor_in("bathroom", "presence") is None:
             print("화장실 presence 센서가 없음")
             return
-        self._after(0, "화장실 입장", lambda: self._presence_at(
+        self._after(0, "화장실 입장 (BOTH sp=90)", lambda: self._presence_at(
             "bathroom", distance_cm=100, target="BOTH", spread_cm=90))
-        self._after(3, "정지", lambda: self._presence_at(
+        self._after(3, "정지 (STATIC sp=2)", lambda: self._presence_at(
             "bathroom", distance_cm=100, target="STATIC", spread_cm=2))
         self._after(40, "30초 정지 — SAFETY 알림이 나와야 한다", lambda: None)
 
@@ -1178,7 +1381,7 @@ class Simulator:
 SCENARIOS = """
 scenario <이름> — 단계를 시간 간격으로 자동 실행 (abort 로 취소)
 
-  meal       조리 → 식사 → 이탈 → 묶음 종료 → 식후 복약
+  meal       조리 → 식사(BOTH sp=30) → 이탈 → 묶음 종료 → 식후 복약
              먼저 'model' 과 'med' 를 쏴야 복약 알림이 나온다
   sleep      침실 재실 → 정지 → 프로브 → 수면 확정
   hydration  급수 → 간격 경과 → LONG_GAP 알림
@@ -1198,17 +1401,29 @@ HELP = """
   dispense                 정수기 급수 이벤트
   remote                   TV 리모컨 입력 이벤트
 
-센서
-  presence <area> [off|keep]  재실, 움직임 (target=BOTH sp=90)
-                                나머지 구역은 비워진다
-                                keep 를 주면 안 비운다 — 2인 상황 테스트용
-  still <area> [keep]      재실, 정지 (target=STATIC sp=5) — 낙상·수면·식사
-  motion <area> [off]      PIR
-  bed [area] [off]         압력 패드
-  door [open|close]        현관문
-  power <vid> <watt>       전력 센서
-  climate <온도> <습도>     온습도 — HEAT_ONSET / DRY_ONSET
-  lux <값>                 조도
+센서 — 센서가 보내는 값을 그대로 적는다. 시뮬레이터가 대신 고르지 않는다.
+  presence <area> <true|false> [target] [sp] [d=N] [keep]
+      present 가 true 면 target 과 sp 를 반드시 적는다
+        target   NONE | MOVING | STATIC | BOTH
+        sp       dist_spread_cm — 최근 10초 거리 변동폭
+        d=N      distance_cm (기본 150)
+        keep     다른 구역을 비우지 않는다 — 2인 상황 테스트용
+      presence kitchen true BOTH 90     걸어 들어옴
+      presence kitchen true BOTH 30     앉아서 식사 — 팔은 움직이고 자리는 그대로
+      presence bedroom true STATIC 3    완전 정지 — 자는 사람·쓰러진 사람
+      presence kitchen false            이탈 (NONE / 0 으로 나간다)
+  motion <area> <true|false>   PIR
+  bed [area] <true|false>      압력 패드 (패드가 하나면 area 생략)
+  door <true|false>            현관문 — true = 열림
+  power <vid> <watt>           전력 센서
+  climate <온도> <습도>         온습도 — HEAT_ONSET / DRY_ONSET
+  lux <값>                     조도
+  heartbeat [초|off]           presence 재발행 주기 (기본 20초)
+      실제 노드의 PERIOD_MS 와 같다. 끄면 손으로 쏠 때만 엔진이
+      깨어나므로 dwell·still_sec 가 시각이 지나도 안 걸린다
+
+  settled 는 sp < settle_spread_max_cm (기본 40) 이다. 실측 기준:
+  앉음 ≤32 / 걷기 ≥45 (2026-10-16). 출력의 [정지]/[이동] 이 그 판정이다.
 
 배치·앱이 보내는 것
   model [late]             KDE 모델. 없으면 식사·복약이 안 돈다
@@ -1223,10 +1438,15 @@ HELP = """
 수면 프로브에 "깨어 있다"고 답하는 길은 셋이다 (scenarios._responded)
   ok                       버튼 — 배너 프로브처럼 알림이 있을 때만
   light <구역> <밝기>       조명을 되돌림 — dim 프로브
-  presence <구역>           움직임 — 언제나
+  bed <구역> false          패드 해제 — 일어나 나간 것
+      움직임(presence)으로는 안 깨진다. target 에 크기가 없어
+      뒤척임과 깨어서 손을 쓰는 것이 구별되지 않기 때문 (2026-10-16)
+
+낙상 알림에 "괜찮다"고 답하는 길
+  presence <구역> true BOTH 90   발송 뒤에 시작된 이동 성분만 인정된다
 
 묶음
-  home                     거실 재실, 나머지 비움
+  home                     거실 재실(BOTH sp=90), 나머지 비움
   out                      전 구역 비움 + 현관 개폐 → AWAY
   scenario <이름>           시나리오 자동 실행 (scenario 만 치면 목록)
   wait <초>                그만큼 뒤에 표시
