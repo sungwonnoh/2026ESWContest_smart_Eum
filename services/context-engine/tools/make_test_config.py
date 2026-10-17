@@ -53,9 +53,11 @@ REPLACEMENTS: list[tuple[str, str, str]] = [
     ("min_duration_sec", "120", "15"),
     ("session_timeout_sec", "7200", "600"),
     ("cooking_lookback_sec", "7200", "600"),
-    ("eating_min_dwell_sec", "300", "20"),
-    ("prep_to_eating_gap_sec", "180", "5"),
-    ("fridge_recent_window_sec", "900", "60"),
+    ("eating_min_dwell_sec", "300", "30"),
+    ("prep_to_eating_gap_sec", "180", "10"),
+    ("heated_window_sec", "900", "120"),
+    ("fridge_recent_window_sec", "900", "120"),
+    ("kitchen_defer_sec", "600", "30"),
 
     # --- 수면 프로브
     ("probe_still_sec", "900", "30"),
