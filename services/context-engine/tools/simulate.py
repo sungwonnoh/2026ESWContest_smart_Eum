@@ -321,7 +321,6 @@ class Simulator:
                 return (
                     f"meals={[hhmm(t) for t in p.get('meals', [])]} "
                     f"hyd={len(p.get('hydrations', []))} "
-                    f"med={len(p.get('medications', []))}"
                 )
         return None
 
@@ -1169,8 +1168,20 @@ class Simulator:
             topics.append(f"hestia/device/{d.id}/state")
         for t in topics:
             self._client.publish(t, b"", qos=1, retain=True)
-        print(f"  retained {len(topics)}건 삭제")
 
+        # 화면과 기억을 같이 비운다. _last_context 를 안 비우면 엔진이
+        # 초기값을 다시 발행해도 '안 바뀌었다' 로 걸러져 안 찍힌다.
+        self._last_context.clear()
+        self._last_notify_id = None
+        self._presence_last.clear()
+        print("\033[2J\033[H", end="")
+        self._client.publish("hestia/sim/clear",
+                             json.dumps({"at": time.time()}).encode(),
+                             qos=1, retain=False)
+        print(f"  retained {len(topics)}건 삭제 — 화면 초기화")
+
+        # 가전 상태는 바로 다시 쏜다. 지우고 두면 엔진이 전원을 '모른다' 로
+        # 보고, _powered() 가 꺼진 TV 를 켜진 것으로 취급한다 (2026-10-17).
         for vid in self.devices:
             self._publish_state(vid)
         print(f"  가전 {len(self.devices)}대 상태 재발행")
