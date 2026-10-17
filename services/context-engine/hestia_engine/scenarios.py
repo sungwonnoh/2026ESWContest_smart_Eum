@@ -128,6 +128,7 @@ class ScenarioRunner:
 
         # 식사
         self._meal_fired: set[tuple[int, str]] = set()   # (peak.center, 날짜)
+        self._last_eating_at: float | None = None        # EATING 을 직접 본 시각
 
         # 복약
         self._med_fired: set[tuple[str, int, str]] = set()   # (med_id, 키, 날짜)
@@ -148,6 +149,11 @@ class ScenarioRunner:
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
         self._context = context
+
+        activity = getattr(context, "activity", None)
+        if activity is not None and activity.state == "EATING":
+            self._last_eating_at = self._clock.now()
+
         timers: list[tuple[str, float]] = []
         timers += self._hydration_prompt(context)
         timers += self._safety(context)
@@ -1463,18 +1469,33 @@ class ScenarioRunner:
 
 
     def _ate_in(self, peak: MealPeak, context: Any, now: float) -> bool:
-        """이 구간에 이미 먹었는가. DayState.meals 는 eat_t0 기준."""
+        """이 구간에 이미 먹었는가. DayState.meals 는 eat_t0 기준.
+        """
+        today = day_key(now)
+
         day = getattr(context, "day", None)
         if day is not None:
-            today = day_key(now)
             for ts in day.meals:
                 if day_key(ts) == today and peak.contains(minutes_since_midnight(ts)):
                     return True
 
-        # 지금 먹는 중이면 묶음이 아직 안 닫혀 meals 에 없다.
-        # 그 사이에 "식사 아직이신가요" 가 나가면 안 된다.
+        at = self._last_eating_at
+        if (
+            at is not None
+            and day_key(at) == today
+            and peak.contains(minutes_since_midnight(at))
+        ):
+            return True
+
         activity = getattr(context, "activity", None)
-        return activity is not None and activity.state in ("COOKING", "EATING")
+        if activity is None:
+            return False
+        if activity.state in ("COOKING", "EATING"):
+            return True
+
+        # 들어와서 EATING 판정이 서기까지(eating_min_dwell_sec = 300) 묻지 않는다.
+        defer = float(self._meal_cfg("kitchen_defer_sec", 600))
+        return activity.state == "KITCHEN_MISC" and now - activity.since < defer
 
     def _send_meal(self, context: Any, peak: MealPeak,
                    decision_id: str | None, now: float) -> None:
