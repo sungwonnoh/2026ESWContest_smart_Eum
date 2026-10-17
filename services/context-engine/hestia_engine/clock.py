@@ -71,3 +71,45 @@ class ReplayClock:
 
     def __repr__(self) -> str:
         return f"ReplayClock(t={self._t})"
+
+
+class DemoClock:
+    """실시간으로 흐르되 가리키는 시각을 바꿀 수 있는 시계. 시연용.
+
+    RealClock 과 ReplayClock 사이다 — 시간은 계속 흐르고(RealClock),
+    가리키는 시각은 갈아끼울 수 있다(ReplayClock). 그래서 타이머·쿨다운
+    같은 '지금부터 N초' 로직을 한 줄도 건드리지 않는다.
+
+    ReplayClock 을 상속하면 안 된다. Scheduler 가 isinstance 로 걸러
+    시계를 타이머 예정 시각으로 끌어당기기 때문이다 (timers.py).
+    """
+
+    __slots__ = ("_offset",)
+
+    def __init__(self, offset: float = 0.0) -> None:
+        self._offset = float(offset)
+
+    def now(self) -> float:
+        return time.time() + self._offset
+
+    @property
+    def offset(self) -> float:
+        return self._offset
+
+    def jump_to(self, offset: float) -> tuple[float, float]:
+        """오프셋을 갈아끼우고 (바꾸기 전 now, 바꾼 뒤 now) 를 돌려준다.
+
+        되돌리는 것은 금지. ReplayClock.advance_to 와 같은 이유다 —
+        지연·쿨다운 계산이 음수가 되어 한참 뒤에 통계 이상으로 나타난다.
+        """
+        offset = float(offset)
+        if offset < self._offset:
+            raise ValueError(
+                f"시계를 되돌릴 수 없다: {self._offset} → {offset}"
+            )
+        before = self.now()
+        self._offset = offset
+        return before, self.now()
+
+    def __repr__(self) -> str:
+        return f"DemoClock(offset={self._offset})"

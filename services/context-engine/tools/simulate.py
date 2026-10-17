@@ -28,6 +28,10 @@ presence 는 20초마다 저절로 다시 나간다 (펌웨어 PERIOD_MS 와 같
 최종값 하나만 발행한다. 실제 기기도 대개 그렇고, 중간값이 오면
 엔진의 되돌림 판정이 그것을 사용자 조작으로 오인한다.
 
+시연에서는 'clock' 으로 시각을 옮긴다. 메시지에 실리는 시각과 화면에
+찍는 시각만 가상이고, 내부 스케줄링(하트비트·전환 대기·wait)은 실제
+시간을 쓴다 — 점프가 그것들을 흔들면 안 된다.
+
 실행:
     python tools/simulate.py
     python tools/simulate.py --host 192.168.0.14 --config ./config-test
@@ -42,7 +46,7 @@ import queue
 import sys
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -80,6 +84,9 @@ TARGETS = ("NONE", "MOVING", "STATIC", "BOTH")
 TRUE_WORDS = ("true", "t", "1", "on", "yes", "y")
 FALSE_WORDS = ("false", "f", "0", "off", "no", "n")
 
+# 시연용 시계. 엔진과 모니터가 구독한다. retained 라 늦게 켠 창도 따라온다.
+CLOCK_TOPIC = "hestia/sim/clock"
+
 # 엔진이 내보내는 것들. 구독해서 찍는다.
 WATCH_TOPICS = [
     ("hestia/context/+", 1),
@@ -106,6 +113,14 @@ USAGE_PRESENCE = """사용법: presence <area> <true|false> [target] [sp] [d=N] 
     presence bedroom true STATIC 3     완전 정지 — 자는 사람·쓰러진 사람
     presence kitchen false             이탈 (NONE / 0 으로 나간다)"""
 
+USAGE_CLOCK = """사용법: clock [시각|간격]
+  clock 09:00      다음 09:00 으로. 현재보다 뒤인 가장 가까운 그 시각이다
+  clock +9m30s     상대. +4h, +570(초) 도 된다
+  clock            현재 오프셋과 가상 시각
+
+  시계는 되돌릴 수 없다. 22:00 에서 clock 02:00 은 다음날 02:00 이다.
+  점프 전에 idle 을 쳐라 — 수면 장면만 예외다."""
+
 
 def _as_bool(token: str) -> bool | None:
     """true/false 를 읽는다. on/off, 1/0 도 받는다 — 손이 기억하는 말들이다."""
@@ -115,6 +130,27 @@ def _as_bool(token: str) -> bool | None:
     if t in FALSE_WORDS:
         return False
     return None
+
+
+def _parse_duration(text: str) -> float:
+    """'9m30s' / '4h' / '570' → 초."""
+    text = text.strip().lower()
+    if not text:
+        raise ValueError("빈 간격")
+    if text.isdigit():
+        return float(text)
+    total, num = 0.0, ""
+    for ch in text:
+        if ch.isdigit():
+            num += ch
+            continue
+        if not num or ch not in "hms":
+            raise ValueError(f"모르는 간격: {text}")
+        total += int(num) * {"h": 3600, "m": 60, "s": 1}[ch]
+        num = ""
+    if num:
+        raise ValueError(f"단위가 없다: {text}")
+    return total
 
 
 class Simulator:
@@ -145,6 +181,11 @@ class Simulator:
         self._fridge_opened_at: float | None = None
         self._lux_base: float = 100.0      # lux 명령이 준 '조명을 뺀' 바닥 조도
 
+        # 시연용 가상 시계. clock 명령이 바꾸고 CLOCK_TOPIC 으로 알린다.
+        # 메시지에 실리는 시각과 화면에 찍는 시각만 이것을 쓴다 —
+        # 내부 스케줄링은 실제 시간이다. 점프가 흔들면 안 되기 때문이다.
+        self._offset: float = 0.0
+
         # 마지막으로 쏜 presence 값. 실제 노드처럼 주기적으로 다시 쏜다
         self._presence_last: dict[str, dict[str, Any]] = {}
         self._hb_period: float = 20.0      # 펌웨어 PERIOD_MS 와 같은 역할
@@ -155,6 +196,15 @@ class Simulator:
         )
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
+
+    # ------------------------------------------------------------ 가상 시계
+
+    def _now(self) -> float:
+        """메시지에 실을 시각. 화면에 찍는 시각도 이것이다."""
+        return time.time() + self._offset
+
+    def _now_dt(self) -> datetime:
+        return datetime.fromtimestamp(self._now())
 
     # ------------------------------------------------------------ 생애
 
@@ -211,7 +261,7 @@ class Simulator:
 
         if topic.endswith("/cmd"):
             try:
-                cmd = parse(topic, msg.payload, time.time())
+                cmd = parse(topic, msg.payload, self._now())
             except Exception as exc:                  # noqa: BLE001
                 print(f"파싱 실패: {exc}")
                 return
@@ -231,7 +281,7 @@ class Simulator:
         except (json.JSONDecodeError, UnicodeDecodeError):
             return
 
-        stamp = datetime.now().strftime("%H:%M:%S")
+        stamp = self._now_dt().strftime("%H:%M:%S")
 
         if topic == "hestia/notify/push":
             self._last_notify_id = p.get("notify_id")
@@ -424,7 +474,7 @@ class Simulator:
             return
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": vid,
             "seq": self._next_seq(vid),
             "device_type": d.device_type,
@@ -444,7 +494,7 @@ class Simulator:
             return
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": vid,
             "seq": self._next_seq(vid),
             "device_type": d.device_type,
@@ -466,7 +516,7 @@ class Simulator:
             return
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": vid,
             "seq": self._next_seq(vid),
             "type": s.type,
@@ -584,6 +634,10 @@ class Simulator:
                 self._lux(args)
             case "heartbeat" | "hb":
                 self._heartbeat(args)
+            case "clock":
+                self._clock(args)
+            case "idle":
+                self._idle()
             case "model":
                 self._model(args)
             case "med":
@@ -613,6 +667,93 @@ class Simulator:
             case _:
                 print(f"모르는 명령: {verb} (help)")
 
+    # ------------------------------------------------------------ 시계 명령
+
+    @staticmethod
+    def _parse_clock(spec: str, now: float) -> float:
+        """'09:00' 이면 now 보다 뒤인 가장 가까운 그 시각.
+           '+9m30s' 면 now 에서 더한 시각.
+
+        절대 시각을 '다음 그 시각' 으로 읽으므로 항상 미래로만 간다 —
+        22:00 에서 clock 02:00 은 다음날 02:00 이다.
+        """
+        if spec.startswith("+"):
+            return now + _parse_duration(spec[1:])
+        if ":" not in spec:
+            raise ValueError(f"모르는 시각: {spec}")
+        hh, _, mm = spec.partition(":")
+        try:
+            h, m = int(hh), int(mm)
+        except ValueError:
+            raise ValueError(f"모르는 시각: {spec}") from None
+        if not (0 <= h < 24 and 0 <= m < 60):
+            raise ValueError(f"범위를 벗어난 시각: {spec}")
+        at = datetime.fromtimestamp(now).replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
+        if at.timestamp() <= now:
+            at += timedelta(days=1)
+        return at.timestamp()
+
+    def _clock(self, args: list[str]) -> None:
+        """시계를 옮긴다. 엔진과 모니터가 CLOCK_TOPIC 으로 따라온다.
+
+        점프는 '그 시간을 건너뛴다' 는 뜻이다. 건너뛴 구간에 예정돼
+        있던 알림은 울리지 않은 것으로 엔진이 처리한다.
+        """
+        now = self._now()
+        if not args:
+            print(
+                f"  오프셋 {self._offset:+.0f}초 · 지금 "
+                f"{datetime.fromtimestamp(now):%m-%d %H:%M:%S}"
+            )
+            return
+
+        try:
+            target = self._parse_clock(args[0], now)
+        except ValueError as exc:
+            print(f"  {exc}")
+            print(USAGE_CLOCK)
+            return
+
+        if target <= now:
+            print("  시계는 되돌릴 수 없다")
+            return
+
+        self._offset += target - now
+        self._client.publish(
+            CLOCK_TOPIC,
+            json.dumps({"offset": self._offset, "at": time.time()}),
+            qos=1, retain=True,
+        )
+        print(
+            f"  {datetime.fromtimestamp(now):%H:%M:%S}"
+            f" → {datetime.fromtimestamp(target):%H:%M:%S}"
+            f"   (오프셋 {self._offset:+.0f}초)"
+        )
+
+    def _idle(self) -> None:
+        """모든 구역을 비우고 패드를 푼다. 점프 전에 쓴다.
+
+        문·가전·전력은 건드리지 않는다 — '외출 중 TV 켜둠' 이 의도된
+        장면일 수 있다.
+
+        수면 장면에서는 쓰지 않는다. 자는 사람의 정지와 패드는 건너뛴
+        시간 내내 참이므로, 씻으면 '침대에서 사라졌다' 가 되어 기상
+        판정이 난다.
+        """
+        areas = 0
+        for area in self._config.areas:
+            if self._sensor_in(area, "presence") is not None:
+                self._presence_at(area, present=False)
+                areas += 1
+        pads = 0
+        for vid in self._sensors_of_type("bed"):
+            self._publish_sensor(vid, occupied=False)
+            pads += 1
+        self._presence_last.clear()
+        print(f"  구역 {areas}곳 비움 · 패드 {pads}개 해제")
+
     # ------------------------------------------------------------ 가전 명령
 
     def _device_power(self, device_type: str, args: list[str]) -> None:
@@ -620,7 +761,10 @@ class Simulator:
         if vid is None:
             print(f"{device_type} 가 설정에 없음")
             return
-        on = not args or args[0] != "off"
+        if args and args[0].lower() not in TRUE_WORDS + FALSE_WORDS:
+            print(f"사용법: {device_type.split('_')[-1]} <on|off>")
+            return
+        on = not args or _as_bool(args[0]) is not False
         self._set(vid, power="ON" if on else "OFF")
         print(f"  {vid} power={'ON' if on else 'OFF'}")
 
@@ -661,7 +805,7 @@ class Simulator:
         if vid is None:
             return
         opened = bool(args) and args[0] == "open"
-        now = time.time()
+        now = self._now()
         self._set(vid, door="OPEN" if opened else "CLOSED")
         if opened:
             self._fridge_opened_at = now
@@ -966,9 +1110,12 @@ class Simulator:
 
             model          지금이 봉우리 한가운데 → TIME_NORMAL
             model late     봉우리를 지남 → ANOMALY (식사 알림)
+
+        '지금' 은 가상 시각이다. clock 으로 19:00 에 서 있으면 봉우리도
+        거기 선다 — 안 그러면 점프한 시각과 봉우리가 어긋난다.
         """
         late = bool(args) and args[0] == "late"
-        now = datetime.now()
+        now = self._now_dt()
         m = now.hour * 60 + now.minute
 
         if late:
@@ -989,9 +1136,9 @@ class Simulator:
 
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": "rpi4",
-            "trained_at": int(time.time()) - 3600,
+            "trained_at": int(self._now()) - 3600,
             "sample_days": 21,
             "distributions": {
                 "meal_time": {
@@ -1041,23 +1188,27 @@ class Simulator:
 
         감기약 = 식후 1분 (식사 묶음이 닫히고 1분 뒤)
         혈압약 = 지금부터 2분 뒤 고정 시각
+
+        '지금' 은 가상 시각이다 — 고정 시각 복약이 점프한 시각 기준으로
+        잡혀야 한다.
         """
         if args and args[0] == "clear":
             payload = {
-                "version": SRC_VERSION, "sent_ts": int(time.time()),
+                "version": SRC_VERSION, "sent_ts": int(self._now()),
                 "src_id": "rpi5-api", "medications": [],
             }
             self._publish_raw("hestia/registry/medications", payload, retain=True)
             print("  복약 등록 비움")
             return
 
-        today = date.today()
+        now = self._now_dt()
+        today = now.date()
         end = today + timedelta(days=4)
-        soon = datetime.now() + timedelta(minutes=2)
+        soon = now + timedelta(minutes=2)
 
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": "rpi5-api",
             "medications": [
                 {
@@ -1100,7 +1251,7 @@ class Simulator:
         age_sec <= weather.max_age_sec 를 보고 오래된 값을 버린다.
         """
         what = args[0].lower() if args else "on"
-        now = int(time.time())
+        now = int(self._now())
 
         if what == "dry":
             warnings = [{"name": "건조주의보", "type": "DRY", "level": "ADVISORY"}]
@@ -1140,7 +1291,7 @@ class Simulator:
         vid = self._first_of_type("display_node") or "vd-10"
         payload = {
             "version": SRC_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self._now()),
             "src_id": vid,
             "seq": self._next_seq(vid),
             "notify_id": self._last_notify_id,
@@ -1152,14 +1303,18 @@ class Simulator:
     def _profile(self, args: list[str]) -> None:
         name = args[0].upper() if args else "DEMO"
         payload = {
-            "version": SRC_VERSION, "sent_ts": int(time.time()),
+            "version": SRC_VERSION, "sent_ts": int(self._now()),
             "src_id": "rpi4", "profile": name,
         }
         self._publish_raw("hestia/system/profile", payload, retain=True)
         print(f"  프로파일 {name}")
 
     def _clear_retained(self) -> None:
-        """retained 를 전부 지운다. 스키마를 바꿨을 때 옛 값이 남는다."""
+        """retained 를 전부 지운다. 스키마를 바꿨을 때 옛 값이 남는다.
+
+        시계 오프셋(CLOCK_TOPIC)은 지우지 않는다 — 지우면 늦게 붙는
+        모니터가 혼자 실시간을 찍는다.
+        """
         topics = ["hestia/model/kde", "hestia/registry/medications",
                   "hestia/external/weather", "hestia/system/profile"]
         for s in self._config.all_sensors():
@@ -1176,7 +1331,7 @@ class Simulator:
         self._presence_last.clear()
         print("\033[2J\033[H", end="")
         self._client.publish("hestia/sim/clear",
-                             json.dumps({"at": time.time()}).encode(),
+                             json.dumps({"at": self._now()}),
                              qos=1, retain=False)
         print(f"  retained {len(topics)}건 삭제 — 화면 초기화")
 
@@ -1381,6 +1536,11 @@ class Simulator:
             d = self._config.device(vid)
             fields = " ".join(f"{k}={v}" for k, v in self.devices[vid].items())
             print(f"  {vid:8} {d.device_type:16} {fields}")
+        if self._offset:
+            print(
+                f"  가상 시각 {self._now_dt():%m-%d %H:%M:%S}"
+                f"  (오프셋 {self._offset:+.0f}초)"
+            )
         if self._pending:
             print(f"  전환 대기 {len(self._pending)}건")
         if self._script:
@@ -1435,6 +1595,21 @@ HELP = """
 
   settled 는 sp < settle_spread_max_cm (기본 40) 이다. 실측 기준:
   앉음 ≤32 / 걷기 ≥45 (2026-10-16). 출력의 [정지]/[이동] 이 그 판정이다.
+
+시각 — 하루를 몇 장면으로 보여줄 때 쓴다
+  clock 09:00              다음 09:00 으로 점프. 항상 미래로만 간다
+  clock +9m30s             상대 점프 (+4h, +570 도 된다)
+  clock                    현재 오프셋과 가상 시각
+  idle                     전 구역 비움 + 패드 해제 — 점프 전에 친다
+
+  점프는 그 시간을 건너뛴다는 뜻이다. 건너뛴 구간에 예정돼 있던 알림은
+  울리지 않은 것으로 엔진이 처리한다.
+
+  점프하면 안 되는 때 — 프로브가 떠 있을 때, EATING 판정 중,
+  확인이 필요한 알림이 떠 있을 때. 절차가 한 틱에 지나가 버린다.
+
+  수면 장면에서는 idle 을 치지 않는다. 자는 사람의 정지와 패드는
+  건너뛴 시간 내내 참이다.
 
 배치·앱이 보내는 것
   model [late]             KDE 모델. 없으면 식사·복약이 안 돈다
