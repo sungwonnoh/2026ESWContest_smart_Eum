@@ -144,6 +144,8 @@ class Ctx:
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
+            "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
         })
 
     def motion(self, vid: str, motion: bool = True):

@@ -80,21 +80,48 @@ std::string notifyAckTopic(){
     return "hestia/notify/ack";
 }
 
-std::string buildPresence(const char* src_id, uint32_t seq, uint32_t sent_ts, 
-    bool present, uint8_t energy, uint16_t distance_cm){
-        JsonDocument doc;
-        putEnvelope(doc, src_id, seq, sent_ts);
-
-        doc["type"] = typeName(SensorType::Presence);
-        doc["present"] = present;
-        doc["confidence"] = "high";
-        doc["energy"] = energy;
-        doc["distance_cm"] = distance_cm;
-
-        std::string out;
-        serializeJson(doc, out);
-        return out;    
+static const char* targetName(uint8_t target) {
+    switch (target) {
+        case 0: return "NONE";
+        case 1: return "MOVING";
+        case 2: return "STATIC";
+        case 3: return "BOTH";
     }
+    return "UNKNOWN";
+}
+
+std::string buildPresence(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                          const PresenceReading& r) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+
+    doc["type"]        = typeName(SensorType::Presence);
+    doc["present"]     = r.present;
+    doc["confidence"]  = "high";
+    doc["energy"]      = r.energy;
+    doc["distance_cm"] = r.distance_cm;
+
+    if (r.has_detail) {
+        doc["moving_energy"]  = r.moving_energy;
+        doc["static_energy"]  = r.static_energy;
+        doc["target"]         = targetName(r.target);
+        doc["dist_spread_cm"] = r.dist_spread_cm;
+    }
+
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
+// 기존 호출부 호환 — 상세 없이 발행한다
+std::string buildPresence(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                          bool present, uint8_t energy, uint16_t distance_cm) {
+    PresenceReading r;
+    r.present     = present;
+    r.energy      = energy;
+    r.distance_cm = distance_cm;
+    return buildPresence(src_id, seq, sent_ts, r);
+}
 
 std::string buildMotion(const char* src_id, uint32_t seq, uint32_t sent_ts,
                         bool motion) {

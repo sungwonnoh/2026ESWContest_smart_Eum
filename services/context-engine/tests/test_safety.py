@@ -43,6 +43,8 @@ class Ctx:
             "version": 1, "sent_ts": 0, "src_id": "vs-11", "seq": seq,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 80,
+            "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
         })
 
     def device(self, vid: str, device_type: str, power: str = "ON"):

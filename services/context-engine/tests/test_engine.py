@@ -48,6 +48,8 @@ class Ctx:
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
+            "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
         })
 
     def profile(self, name: str):
@@ -96,6 +98,7 @@ def test_works_without_publisher(tmp_path):
         "version": 1, "sent_ts": 0, "src_id": "vs-04", "seq": 1,
         "type": "presence", "present": True, "confidence": "high",
         "energy": 50, "distance_cm": 150,
+        "target": "BOTH", "dist_spread_cm": 90,
     }))
     assert engine.context.presence.user_area == "kitchen"
 

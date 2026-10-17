@@ -128,7 +128,8 @@ class PresenceEvaluator:
         # 구역별 근거 수집
         by_area: dict[str, list[Evidence]] = {}
         for area in self._config.areas:
-            evidence = self._evidence_of(area, now, timers, factors)
+            was = prev.areas.get(area, False) if prev is not None else False
+            evidence = self._evidence_of(area, now, timers, factors, was_present=was)
             if evidence:
                 by_area[area] = evidence
 
@@ -166,13 +167,16 @@ class PresenceEvaluator:
         now: float,
         timers: list[tuple[str, float]],
         factors: dict[str, Any],
+        *,
+        was_present: bool,
     ) -> list[Evidence]:
         """한 구역의 센서들을 훑어 해당 구역에 사람이 있다는 근거를 모음
         근거가 하나도 없으면 빈 리스트(=> 무인)"""
         #policy.toml에서 임계값 읽기
         conf = self._config.value("presence", "confidence", default={})
-        still_max = float(self._config.value("presence", "energy", "still_max", default=10))
-        active_min = float(self._config.value("presence", "energy", "active_min", default=30))
+        entry_motion = bool(
+            self._config.value("presence", "entry_requires_motion", default=True)
+        )
         grace = float(self._config.value("presence", "mmwave_absent_grace_sec", default=30))
         pir_timeout = float(self._config.value("presence", "pir_absent_timeout_sec", default=300))
 
@@ -196,14 +200,34 @@ class PresenceEvaluator:
                 case PresenceState():       #mmWave
                     factors[f"{st.vid}_present"] = st.present
                     factors[f"{st.vid}_energy"] = st.energy
-                    if st.present:      #present=true인 경우
-                        kind = "mmwave_active" if st.energy >= active_min else "mmwave_still"
-                        found.append(
-                            Evidence(st.vid, kind, float(conf.get(kind, 0.9)), st.changed_at or now)
-                        )
+                    factors[f"{st.vid}_target"] = st.target
+                    factors[f"{st.vid}_spread"] = st.dist_spread_cm
+                    if st.present:
+                        if st.is_moving():
+                            # 움직임은 사물이 만들 수 없다. 진입 근거가 된다.
+                            found.append(
+                                Evidence(
+                                    st.vid, "mmwave_active",
+                                    float(conf.get("mmwave_active", 0.9)),
+                                    st.changed_at or now,
+                                )
+                            )
+                        elif was_present or st.prev_present is None or not entry_motion:
+                            # 정지 단독 — 이미 재실이던 구역의 '유지'에만 쓴다.
+                            # 앉아 있는 사람을 놓치지 않는 것이 이 근거의 본업이다.
+                            found.append(
+                                Evidence(
+                                    st.vid, "mmwave_still",
+                                    float(conf.get("mmwave_still", 0.85)),
+                                    st.changed_at or now,
+                                )
+                            )
+                        else:
+                            # 정지 단독 + 직전 부재 → 벽·가구일 수 있다.
+                            # 2026-10-15: 279cm 벽이 65초간 재실을 만들었다.
+                            factors[f"{st.vid}_static_denied"] = True
                     else:
-                        # present=false 를 즉시 믿되, grace 만큼은 유예한다. (30초 유예)
-                        # 노드 재부팅 직후의 한 건을 걸러내는 용도.
+                        # present=false 를 즉시 믿되, grace 만큼은 유예한다.
                         if (
                             st.prev_present
                             and st.changed_at > 0.0
@@ -216,7 +240,6 @@ class PresenceEvaluator:
                                 )
                             )
                             timers.append((f"mmwave-{st.vid}", st.changed_at + grace))
-                            #유예 시간 후(changed_at + grace)에 재계산하도록 타이머 예약
 
                 case BedState():        #압력 패드
                     factors[f"{st.vid}_occupied"] = st.occupied
@@ -550,7 +573,6 @@ class OccupancyEvaluator:
         다용도실 PIR 이 반응했다고 '두 번째 사람'으로 보면 안 된다.
         """
         conf = self._config.value("presence", "confidence", default={})
-        active_min = float(self._config.value("presence", "energy", "active_min", default=30))
         out: list[tuple[str, float]] = []
 
         for area in areas:
@@ -559,7 +581,7 @@ class OccupancyEvaluator:
             for st in self._world.sensors_of(area):
                 match st:
                     case PresenceState() if st.present:
-                        kind = "mmwave_active" if st.energy >= active_min else "mmwave_still"
+                        kind = "mmwave_active" if st.is_moving() else "mmwave_still"
                         score = float(conf.get(kind, 0.9))
                     case BedState() if st.occupied:
                         score = float(conf.get("bed", 0.8))

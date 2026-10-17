@@ -16,6 +16,9 @@
 한 번에 띄우려면 demo-open.sh (macOS·WSL), demo-open.ps1 (Windows),
 demo-screen.sh (tmux).
 
+simulate 의 clear 는 hestia/sim/clear 로 온다. retained 삭제는 빈
+페이로드라서 여기서 무시되기 때문에(무시해야 맞다) 신호를 따로 받는다.
+
 모르는 필드는 번역하지 않고 키=값 그대로 찍는다. 화면에 안 보이는 것보다
 덜 다듬어져 보이는 게 낫다.
 """
@@ -310,6 +313,14 @@ class View:
     def handle(self, topic: str, p: dict) -> list[str]:
         return []
 
+    def reset(self) -> None:
+        """simulate 의 clear. 창이 쌓아 둔 상태를 버린다.
+
+        화면 지우기는 main 이 한다 — 여기서는 상태를 들고 있는 창만
+        비우면 된다. 안 비우면 clear 이전 값이 뒤에 섞여 나온다.
+        """
+        return
+
     def banner(self) -> str:
         rule = "─" * max(1, self.width - cols(self.title) - 2)
         return f" {self.title} {rule}\n"
@@ -360,6 +371,11 @@ class InputView(View):
                 "hestia/device/+/state",
                 "hestia/device/+/event",
                 "hestia/registry/devices"]
+
+    def reset(self) -> None:
+        # 안 비우면 clear 직후 재발행된 값이 '직전과 같다'로 전부 묻힌다
+        self._last.clear()
+        self._since.clear()
 
     def handle(self, topic: str, p: dict) -> list[str]:
         parts = topic.split("/")
@@ -512,6 +528,10 @@ class ActivityView(View):
 
     def topics(self) -> list[str]:
         return ["hestia/context/activity"]
+
+    def reset(self) -> None:
+        # clear 직후 같은 상태가 다시 오면 찍혀야 한다
+        self._prev = None
 
     def handle(self, topic: str, p: dict) -> list[str]:
         state = str(p.get("state", "?"))
@@ -768,7 +788,6 @@ class BoardView(View):
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
         self.meds: list[dict] = []         # registry/medications — 등록된 약
-        self.med_push = 0                  # 오늘 복약 알림 발송 횟수
         self.day = time.strftime("%Y-%m-%d")
 
     def topics(self) -> list[str]:
@@ -778,8 +797,21 @@ class BoardView(View):
                 "hestia/log/t0",
                 "hestia/node/+/announce", "hestia/node/+/status",
                 "hestia/registry/devices",
-                "hestia/registry/medications",
-                "hestia/notify/push"]
+                "hestia/registry/medications"]
+
+    def reset(self) -> None:
+        # 노드 보고는 announce 가 다시 오므로 같이 버린다. 하나도 안 남겨야
+        # '지운 뒤 뭐가 살아 돌아왔는지' 가 화면에 그대로 보인다
+        self.act = {}
+        self.pres = {}
+        self.away = {}
+        self.occ = {}
+        self.sup = {}
+        self.nodes.clear()
+        self.daily = None
+        self.count.clear()
+        self.meds = []
+        self.day = time.strftime("%Y-%m-%d")
 
     def handle(self, topic: str, p: dict) -> list[str]:
         match topic.split("/")[1:]:
@@ -812,11 +844,7 @@ class BoardView(View):
                 self.inv.apply_registry(p.get("devices", []))
             case ["registry", "medications"]:
                 self.meds = [m for m in p.get("medications", []) if isinstance(m, dict)]
-            case ["notify", "push"]:
-                # 복약은 확인도 기록도 하지 않는다 (설계). day.medications 가
-                # 영원히 비므로 상황판에는 '보낸 횟수' 를 보여준다.
-                if str(p.get("scenario")) == "MEDICATION":
-                    self.med_push += 1
+
         return []
 
     def render(self) -> str:
@@ -853,7 +881,7 @@ class BoardView(View):
             row("  억제   없음")
         row()
         meals, hyd, _ = self._today()
-        row(f"  오늘   끼니 {meals}   수분 {hyd}   복약 알림 {self.med_push}")
+        row(f"  오늘   끼니 {meals}   수분 {hyd}")
         if self.meds:
             names = ", ".join(str(m.get("name", "?")) for m in self.meds[:3])
             more = f" +{len(self.meds) - 3}" if len(self.meds) > 3 else ""
@@ -904,6 +932,10 @@ class T0View(View):
 
     def topics(self) -> list[str]:
         return ["hestia/log/t0"]
+
+    def reset(self) -> None:
+        # 남아 있으면 clear 이후의 sleep_end 와 짝지어 엉뚱한 길이를 찍는다
+        self._sleep_t0 = None
 
     def handle(self, topic: str, p: dict) -> list[str]:
         t = str(p.get("type", "?"))
@@ -984,6 +1016,14 @@ class DisplayView(View):
         return ["hestia/notify/push", "hestia/notify/speak",
                 "hestia/notify/ack", "hestia/notify/cancel",
                 "hestia/registry/devices"]
+
+    def reset(self) -> None:
+        # last 까지 지운다. 이게 안 지워져서 clear 뒤에도 옛 알림이 남았다
+        self.cur = None
+        self.cur_at = 0.0
+        self.speech = ""
+        self.acked = ""
+        self.last = ""
 
     # ---- 수신
 
@@ -1128,6 +1168,10 @@ VIEWS: dict[str, type[View]] = {
 # 따라 화면을 스크롤백으로 밀어내서 프레임이 아래로 쌓인다.
 CLEAR = "\033[H\033[J"
 
+# simulate 의 clear 가 쏘는 신호. retained 삭제(빈 페이로드)로는 모니터에
+# 아무것도 전달되지 않는다 — 빈 건 무시해야 맞으므로 토픽을 따로 둔다
+CLEAR_TOPIC = "hestia/sim/clear"
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="HESTIA 시연 모니터")
@@ -1152,6 +1196,12 @@ def main() -> int:
         view.HOLD_SEC = args.hold
     board = view.live
 
+    def repaint() -> None:
+        """처음과 clear 때 쓰는 한 장. live 는 그림, 로그는 제목줄."""
+        print(clear + ("" if board else view.banner()), end="", flush=True)
+        if board:
+            print(view.render(), end="", flush=True)
+
     print(clear if board else view.banner(), end="", flush=True)
 
     def on_connect(client, userdata, flags, rc, properties=None):
@@ -1160,8 +1210,17 @@ def main() -> int:
             return
         for t in view.topics():
             client.subscribe(t, qos=0)
+        client.subscribe(CLEAR_TOPIC, qos=0)
 
     def on_message(client, userdata, msg):
+        # clear 가 먼저다. 빈 페이로드로 와도 받아야 한다
+        if msg.topic == CLEAR_TOPIC:
+            try:
+                view.reset()
+            except Exception as exc:
+                print(f"  초기화 실패: {exc}", file=sys.stderr)
+            repaint()
+            return
         # 빈 페이로드는 retained 삭제 신호다 (simulate 의 clear). 조용히 넘긴다
         if not msg.payload or not msg.payload.strip():
             return
