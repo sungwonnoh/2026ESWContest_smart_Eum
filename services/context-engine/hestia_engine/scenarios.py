@@ -69,6 +69,7 @@ class AsleepState:
     since: float                     # sleep_start 의 t0
     area: str | None
     decision_id: str | None = None
+    confirmed_at: float = 0.0 
 
 
 class ScenarioRunner:
@@ -457,7 +458,7 @@ class ScenarioRunner:
             awake_areas=self._take_awake_areas(area),
         )
         self.asleep = AsleepState(
-            since=t0, area=area, decision_id=decision_id,
+            since=t0, area=area, decision_id=decision_id, confirmed_at=now,
         )
         self._notify_asleep(area)
 
@@ -467,6 +468,32 @@ class ScenarioRunner:
                 probe.target, power="OFF",
                 reason="SLEEP_ROUTINE", priority="low",
             )
+
+        self._lights_out(skip=probe.target if probe is not None else None)
+
+
+    def _lights_out(self, *, skip: str | None = None) -> None:
+        """잠들었으면 집안 TV 와 조명을 전부 끈다.
+
+        프로브가 있었든(dim·banner) 없었든(none) 똑같이 돈다 — 불을 끄고
+        침실에 들어간 경우가 method=none 인데, 그때도 거실 TV 는 켜져
+        있을 수 있다. probe.target 하나만 끄면 그게 그대로 남는다.
+
+        이미 꺼진 것은 건드리지 않는다. 명령이 두 번 나가면 로그가
+        지저분하고, 기상 때 켤 야간 조명과도 엉킨다.
+        """
+        for area in self._config.areas:
+            for kind in ("smart_tv", "smart_light"):
+                for vid in self._controller.devices_of_type(kind, area):
+                    if vid == skip:
+                        continue        # 바로 위에서 이미 껐다
+                    st = self._world.device(vid)
+                    if st is None or st.get("power") != "ON":
+                        continue
+                    self._controller.set(
+                        vid, power="OFF",
+                        reason="SLEEP_ROUTINE", priority="low",
+                    )
 
 
     def _log_sleep(
@@ -491,14 +518,22 @@ class ScenarioRunner:
             return now
 
         area = self.asleep.area
+        floor = self.asleep.confirmed_at       # since 는 소급된 t0 라 쓸 수 없다
+
         bed = self._bed_in(area)
-        if bed is not None and not bed.occupied and bed.changed_at > self.asleep.since:
+        if bed is not None and not bed.occupied and bed.changed_at > floor:
             return bed.changed_at
 
         sustain = float(self._sleep_value("end_sustain_sec", 60))
         since = self._moving_since(area)
-        if since is not None and now - since >= sustain:
-            return since
+        if since is not None:
+            # 잠들기 전부터 이어진 이동은 확정의 근거가 아니었으므로
+            # 기상의 근거도 될 수 없다. floor 로 눌러두면 sleep_end 가
+            # sleep_start 보다 앞서는 일도 막힌다 — floor 는 확정 시각이고
+            # t0 는 늘 그보다 앞이다.
+            start = max(since, floor)
+            if now - start >= sustain:
+                return start
         return None
 
     def _moving_since(self, area: str) -> float | None:
