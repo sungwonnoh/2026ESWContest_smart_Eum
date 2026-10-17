@@ -180,6 +180,8 @@ class Ctx:
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
+                        "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
+            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
         })
 
     def bed(self, vid: str, occupied: bool):
@@ -356,7 +358,7 @@ def test_eating_needs_gap(c):
 def test_eating_without_cooking(c):
     """조리하지 않는 끼니도 잡힌다. 조리 종료는 관문이 아니다."""
     c.presence("vs-04", True)
-    c.at(MORNING + 400).presence("vs-04", True, energy=12)
+    c.at(MORNING + 400).presence("vs-04", True, energy=5)
     assert c.a.state == "EATING"
 
 
@@ -365,14 +367,14 @@ def test_stale_cooking_is_not_evidence(c):
     c.presence("vs-04", True)
     c.power("vs-06", 1180, state="ON")
     c.at(MORNING + 100).power("vs-06", 3, state="STANDBY")
-    c.at(MORNING + 100 + 5000).presence("vs-04", True, energy=12)
+    c.at(MORNING + 100 + 5000).presence("vs-04", True, energy=5)
     assert c.a.factors["cooking_off_sec"] > 3600
-    # 그래도 dwell + low_energy 로 EATING 은 선다
+    # 그래도 dwell + settled 로 EATING 은 선다
     assert c.a.state == "EATING"
 
 
 def test_dishes_is_not_eating(c):
-    """서서 오래 있는 것은 설거지다. low_energy 가 가른다."""
+    """서서 오래 있는 것은 설거지다. settled 가 가른다."""
     c.presence("vs-04", True, energy=50)
     c.at(MORNING + 400).presence("vs-04", True, energy=50)
     assert c.a.state == "KITCHEN_MISC"
@@ -389,7 +391,7 @@ def test_heated_recent_boosts_eating(c):
     c.presence("vs-04", True)
     c.power("vs-14", 800, state="ON")
     c.at(MORNING + 120).power("vs-14", 2, state="OFF")
-    c.at(MORNING + 400).presence("vs-04", True, energy=12)
+    c.at(MORNING + 400).presence("vs-04", True, energy=5)
     assert c.a.factors["heated_sec"] is not None
     assert c.a.state == "EATING"
 

@@ -54,7 +54,7 @@ class SleepProbe:
     started_at: float
     deadline: float
     still_sec: float                 # 프로브 시점의 정지 시간
-    still_since: float               # 정지가 시작된 시각. sleep_start 의 t0
+    still_since: float               # dist_spread_cm 이 settle_spread_max_cm 아래로 내려간 시각
     notify_id: str | None = None
     target: str | None = None        # dim 일 때 조명 vid
     base: int | None = None          # 프로브 시작 시점 밝기. 단계 계산의 기준
@@ -69,6 +69,7 @@ class AsleepState:
     since: float                     # sleep_start 의 t0
     area: str | None
     decision_id: str | None = None
+    confirmed_at: float = 0.0 
 
 
 class ScenarioRunner:
@@ -128,6 +129,7 @@ class ScenarioRunner:
 
         # 식사
         self._meal_fired: set[tuple[int, str]] = set()   # (peak.center, 날짜)
+        self._last_eating_at: float | None = None        # EATING 을 직접 본 시각
 
         # 복약
         self._med_fired: set[tuple[str, int, str]] = set()   # (med_id, 키, 날짜)
@@ -141,10 +143,18 @@ class ScenarioRunner:
         self._dl_at: float | None = None          # 마지막 조정
         self._dl_hold: float | None = None        # 사용자 개입 유예 끝
 
+        # 낙상
+        self._safety_answered: dict[str, float] = {}   # 구역 → 응답받은 정지 시작 시각
+
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
         self._context = context
+
+        activity = getattr(context, "activity", None)
+        if activity is not None and activity.state == "EATING":
+            self._last_eating_at = self._clock.now()
+
         timers: list[tuple[str, float]] = []
         timers += self._hydration_prompt(context)
         timers += self._safety(context)
@@ -400,8 +410,6 @@ class ScenarioRunner:
             return True
         if probe.area is None:
             return False
-        if self._moving_since(probe.area) is not None:
-            return True                     # 뒤척임이 아닌 움직임
 
         # 침대에서 내려왔다. 프로브 중에 패드가 풀린 것은 가장 분명한
         # '깨어 있다' 다 — 일어나 걸어나간 것이다. 움직임만 보면 놓친다:
@@ -450,7 +458,7 @@ class ScenarioRunner:
             awake_areas=self._take_awake_areas(area),
         )
         self.asleep = AsleepState(
-            since=t0, area=area, decision_id=decision_id,
+            since=t0, area=area, decision_id=decision_id, confirmed_at=now,
         )
         self._notify_asleep(area)
 
@@ -460,6 +468,32 @@ class ScenarioRunner:
                 probe.target, power="OFF",
                 reason="SLEEP_ROUTINE", priority="low",
             )
+
+        self._lights_out(skip=probe.target if probe is not None else None)
+
+
+    def _lights_out(self, *, skip: str | None = None) -> None:
+        """잠들었으면 집안 TV 와 조명을 전부 끈다.
+
+        프로브가 있었든(dim·banner) 없었든(none) 똑같이 돈다 — 불을 끄고
+        침실에 들어간 경우가 method=none 인데, 그때도 거실 TV 는 켜져
+        있을 수 있다. probe.target 하나만 끄면 그게 그대로 남는다.
+
+        이미 꺼진 것은 건드리지 않는다. 명령이 두 번 나가면 로그가
+        지저분하고, 기상 때 켤 야간 조명과도 엉킨다.
+        """
+        for area in self._config.areas:
+            for kind in ("smart_tv", "smart_light"):
+                for vid in self._controller.devices_of_type(kind, area):
+                    if vid == skip:
+                        continue        # 바로 위에서 이미 껐다
+                    st = self._world.device(vid)
+                    if st is None or st.get("power") != "ON":
+                        continue
+                    self._controller.set(
+                        vid, power="OFF",
+                        reason="SLEEP_ROUTINE", priority="low",
+                    )
 
 
     def _log_sleep(
@@ -484,18 +518,26 @@ class ScenarioRunner:
             return now
 
         area = self.asleep.area
+        floor = self.asleep.confirmed_at       # since 는 소급된 t0 라 쓸 수 없다
+
         bed = self._bed_in(area)
-        if bed is not None and not bed.occupied and bed.changed_at > self.asleep.since:
+        if bed is not None and not bed.occupied and bed.changed_at > floor:
             return bed.changed_at
 
         sustain = float(self._sleep_value("end_sustain_sec", 60))
         since = self._moving_since(area)
-        if since is not None and now - since >= sustain:
-            return since
+        if since is not None:
+            # 잠들기 전부터 이어진 이동은 확정의 근거가 아니었으므로
+            # 기상의 근거도 될 수 없다. floor 로 눌러두면 sleep_end 가
+            # sleep_start 보다 앞서는 일도 막힌다 — floor 는 확정 시각이고
+            # t0 는 늘 그보다 앞이다.
+            start = max(since, floor)
+            if now - start >= sustain:
+                return start
         return None
 
     def _moving_since(self, area: str) -> float | None:
-        """그 구역에서 명확한 움직임이 시작된 시각. 뒤척임은 걸러진다."""
+        """그 구역에서 이동 성분이 끊기지 않고 이어진 시작 시각."""
         spans = [
             s.moving_since
             for s in self._world.sensors_of(area)
@@ -602,6 +644,7 @@ class ScenarioRunner:
                 # 움직이는 중. 멈추는 순간 센서가 메시지를 보내
                 # 다시 걸리므로 예약하지 않는다.
                 self._notifier.resolve("SAFETY")
+                self._safety_answered.pop(area, None)
                 self._emit_decision(Decision(
                     kind=f"safety:{area}",
                     candidate=False,
@@ -609,7 +652,20 @@ class ScenarioRunner:
                     factors={"area": area, "still_sec": 0, "limit_sec": limit},
                 ))
                 continue
-            
+
+            # 발송 뒤에 시작된 움직임은 응답이다. 정지 해제로는 못 받는다 —
+            # 쓰러진 사람이 팔을 흔들어도 몸통 거리는 변하지 않는다 (2026-10-16).
+            moved = self._world.moving_since(area)
+            if moved is not None:
+                for n in self._notifier.store.of_scenario("SAFETY"):
+                    if n.is_open and moved >= n.sent_at:
+                        self._notifier.resolve("SAFETY")
+                        self._safety_answered[area] = since
+                        break
+
+            if self._safety_answered.get(area) == since:
+                continue        # 이 정지 구간은 이미 응답받았다
+
             still = now - since
             over = still >= limit
 
@@ -1230,10 +1286,10 @@ class ScenarioRunner:
 
     def _area_occupied(self, area: str) -> bool:
         """그 구역에 사람이 있는가."""
-        return any(
-            isinstance(s, PresenceState) and s.present
-            for s in self._world.sensors_of(area)
-        )
+        presence = getattr(self._context, "presence", None)
+        if presence is None:
+            return False
+        return bool(presence.areas.get(area))
 
     def _still_since(self, area: str) -> float | None:
         """그 구역에서 정지가 시작된 시각. 움직이는 중이면 None."""
@@ -1448,18 +1504,33 @@ class ScenarioRunner:
 
 
     def _ate_in(self, peak: MealPeak, context: Any, now: float) -> bool:
-        """이 구간에 이미 먹었는가. DayState.meals 는 eat_t0 기준."""
+        """이 구간에 이미 먹었는가. DayState.meals 는 eat_t0 기준.
+        """
+        today = day_key(now)
+
         day = getattr(context, "day", None)
         if day is not None:
-            today = day_key(now)
             for ts in day.meals:
                 if day_key(ts) == today and peak.contains(minutes_since_midnight(ts)):
                     return True
 
-        # 지금 먹는 중이면 묶음이 아직 안 닫혀 meals 에 없다.
-        # 그 사이에 "식사 아직이신가요" 가 나가면 안 된다.
+        at = self._last_eating_at
+        if (
+            at is not None
+            and day_key(at) == today
+            and peak.contains(minutes_since_midnight(at))
+        ):
+            return True
+
         activity = getattr(context, "activity", None)
-        return activity is not None and activity.state in ("COOKING", "EATING")
+        if activity is None:
+            return False
+        if activity.state in ("COOKING", "EATING"):
+            return True
+
+        # 들어와서 EATING 판정이 서기까지(eating_min_dwell_sec = 300) 묻지 않는다.
+        defer = float(self._meal_cfg("kitchen_defer_sec", 600))
+        return activity.state == "KITCHEN_MISC" and now - activity.since < defer
 
     def _send_meal(self, context: Any, peak: MealPeak,
                    decision_id: str | None, now: float) -> None:

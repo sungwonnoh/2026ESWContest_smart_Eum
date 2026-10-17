@@ -20,7 +20,21 @@ std::string   sensorStateTopic(const char* virtual_id);
 std::string deviceStateTopic(const char* virtual_id);
 std::string notifyAckTopic();
 
+struct PresenceReading {
+    bool     present        = false;
+    uint8_t  energy         = 0;      // max(moving, static) — 기존 호환
+    uint16_t distance_cm    = 0;
+
+    bool     has_detail     = false;
+    uint8_t  moving_energy  = 0;
+    uint8_t  static_energy  = 0;
+    uint8_t  target         = 0;      // 0 NONE / 1 MOVING / 2 STATIC / 3 BOTH
+    uint16_t dist_spread_cm = 0;      // 최근 10초 거리 변동폭
+};
+
 std::string buildPresence(const char* src_id, uint32_t seq, uint32_t sent_ts, bool present, uint8_t energy, uint16_t distance_cm);
+std::string buildPresence(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                          const PresenceReading& r);
 std::string buildMotion(const char* src_id, uint32_t seq, uint32_t sent_ts, bool motion);
 std::string buildDoor(const char* src_id, uint32_t seq, uint32_t sent_ts, bool open);
 std::string buildPower(const char* src_id, uint32_t seq, uint32_t sent_ts, uint16_t watt);
