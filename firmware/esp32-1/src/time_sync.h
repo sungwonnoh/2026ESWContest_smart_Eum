@@ -13,3 +13,9 @@ bool isTimeSynced();
 
 // sent_ts에 쓸 값, 동기화 전에는 부팅 후 경과초에 가까운 작은 값이 나옴
 uint32_t nowTs();
+
+// 시연용 시계 오프셋. hestia/sim/clock 이 바꾼다.
+// nowTs() 가 이걸 더해 돌려주므로 sent_ts 를 쓰는 모든 곳이 따라온다.
+// ts_synced 와는 무관하다 — 그건 NTP 동기화 여부다.
+void    timeSetOffset(int32_t seconds);
+int32_t timeOffset();
