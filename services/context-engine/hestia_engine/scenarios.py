@@ -174,6 +174,27 @@ class ScenarioRunner:
         self._daily_ml += amount_ml
         self._notify_count = 0          # 마셨으면 반복 카운터를 푼다
 
+
+    def on_jump(self, skipped: tuple[str, ...], now: float) -> None:
+        """건너뛴 구간에 예정돼 있던 트리거를 '지나간 것' 으로 친다.
+
+        시연에서 시간을 점프할 때 부른다. 점프는 그 시간을 건너뛴다는
+        뜻이지, 그 시간에 울렸어야 할 알림을 지금 몰아서 낸다는 뜻이
+        아니다 — 정숙 시간이 쌓인 1회성 조건을 버리는 것과 같은 이유로,
+        사용자가 '왜 지금' 을 알 수 없다.
+
+        키 이름이 곧 어떤 트리거였는지를 말해준다 (_hydration_timers).
+        """
+        for key in skipped:
+            if key in ("hydration-gap", "hydration-renotify"):
+                # 보낸 셈 친다. renotify_sec 뒤에 다시 평가된다 —
+                # 영영 막는 것이 아니다.
+                self._last_notify_at = now
+            elif key == "hydration-daily":
+                self._daily_short_sent = True
+            elif key == "hydration-return":
+                self._return_sent = True
+
      # ------------------------------------------------------------ SLEEP_ROUTINE
 
     def _sleep_routine(self, context) -> list[tuple[str, float]]:
