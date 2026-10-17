@@ -51,6 +51,9 @@ min_hold_sec = 10
 [presence]
 entry_requires_motion = true      # STATIC 단독으로는 재실을 시작하지 못한다
 settle_spread_max_cm  = 40        # 이 미만이면 정지. 2026-10-16 실측 (앉음 ≤32 / 걷기 ≥45)
+area_switch_min_sec      = 20     # 구역 전환 최소 지속
+mmwave_absent_grace_sec  = 30     # present=false 뒤 유예
+pir_absent_timeout_sec   = 300    # PIR 무반응을 부재로 보는 시간
 
 # mmWave energy 임계 — 명세: "정지/미세움직임 판정은 노드가 아니라 RPi5 가"
 [presence.energy]
@@ -432,6 +435,7 @@ max_age_sec = 7200
 [scenarios.meal]
 pause_start = "21:00"
 pause_end = "05:00"
+kitchen_defer_sec = 600
 
 [scenarios.medication]
 max_meal_slots = 3
