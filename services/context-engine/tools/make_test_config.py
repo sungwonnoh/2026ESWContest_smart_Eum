@@ -36,6 +36,7 @@ REPLACEMENTS: list[tuple[str, str, str]] = [
     # --- 알림 총량. 이게 제일 중요하다.
     # 안 줄이면 알림 하나 보내고 30분간 나머지가 전부 막힌다.
     ("min_interval_sec", "1800", "20"),
+    ("max_per_day", "8", "200"),
     ("cooldown_sec", "1800", "30"),
     ("ack_deadline_sec", "600", "20"),
     ("ack_deadline_sec", "120", "30"), 
