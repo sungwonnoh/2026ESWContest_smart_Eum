@@ -38,6 +38,10 @@ class Settings:
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     telegram_timeout_sec: float = 10.0
+    telegram_weekly_enabled: bool = False
+    telegram_weekly_weekday: int = 6
+    telegram_weekly_hour: int = 18
+    telegram_weekly_minute: int = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -57,4 +61,8 @@ class Settings:
             telegram_timeout_sec=float(
                 os.getenv("HESTIA_TELEGRAM_TIMEOUT_SEC", str(cls.telegram_timeout_sec))
             ),
+            telegram_weekly_enabled=_env_bool("HESTIA_TELEGRAM_WEEKLY_ENABLED", False),
+            telegram_weekly_weekday=int(os.getenv("HESTIA_TELEGRAM_WEEKLY_WEEKDAY", "6")),
+            telegram_weekly_hour=int(os.getenv("HESTIA_TELEGRAM_WEEKLY_HOUR", "18")),
+            telegram_weekly_minute=int(os.getenv("HESTIA_TELEGRAM_WEEKLY_MINUTE", "0")),
         )

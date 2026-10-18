@@ -34,9 +34,11 @@ def create_app(settings: Optional[Settings] = None, mqtt: Any = None) -> FastAPI
         container.monitor.attach_loop(asyncio.get_running_loop())
         app.state.hestia = container
         container.mqtt.start()
+        container.caregiver_bot.start()
         try:
             yield
         finally:
+            container.caregiver_bot.stop()
             container.mqtt.stop()
             container.db.close()
 

@@ -45,6 +45,10 @@ API 문서: http://localhost:8000/docs
 | `HESTIA_TELEGRAM_BOT_TOKEN` | 빈 값 | BotFather가 발급한 봇 토큰 |
 | `HESTIA_TELEGRAM_CHAT_ID` | 빈 값 | 보호자 Telegram 대화방 ID |
 | `HESTIA_TELEGRAM_TIMEOUT_SEC` | `10` | Telegram API 요청 제한 시간 |
+| `HESTIA_TELEGRAM_WEEKLY_ENABLED` | `0` | 주간 자동 요약 활성화 |
+| `HESTIA_TELEGRAM_WEEKLY_WEEKDAY` | `6` | 자동 발송 요일 (월요일 0, 일요일 6) |
+| `HESTIA_TELEGRAM_WEEKLY_HOUR` | `18` | 자동 발송 시각(로컬 시간) |
+| `HESTIA_TELEGRAM_WEEKLY_MINUTE` | `0` | 자동 발송 분 |
 
 Telegram 1차 정책은 다음과 같다.
 
@@ -53,6 +57,8 @@ Telegram 1차 정책은 다음과 같다.
 - Telegram 장애는 MQTT 수신과 앱 알림을 막지 않는다.
 - 수면·식사 주간 요약은 요약 산출기와 스케줄러를 연결한 뒤 `TelegramService.send_weekly_summary()`를 통해 보낸다. 현재 단계에서는 원천 데이터가 없는데 임의의 요약을 만들지 않는다.
 - 보호자가 즉시 요약을 요청할 때는 `POST /api/v1/caregiver/summary`에 `{"days": 1}` 또는 원하는 기간을 보낸다.
+- 보호자는 봇에서 `/today`, `/week`, `/summary 3` 명령으로 같은 요약을 요청할 수 있다. 등록된 `HESTIA_TELEGRAM_CHAT_ID` 외의 대화는 무시한다.
+- 주간 자동 발송은 `HESTIA_TELEGRAM_WEEKLY_ENABLED=1`로 켜며 기본 일요일 18:00에 전송한다. 봇 프로세스가 재시작되면 해당 실행 중의 스케줄만 다시 관리한다.
 - 현재 `day` 기록으로 식사 횟수·분포를 집계한다. 수면 요약은 Context Engine이 `sleep_interruptions`/`bathroom_visits` 같은 일별 필드를 보내는 경우에만 집계한다.
 
 예시:

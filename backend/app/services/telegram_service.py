@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from urllib import request
+from urllib import parse, request
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,10 @@ class TelegramService:
     @property
     def configured(self) -> bool:
         return self._enabled and bool(self._bot_token and self._chat_id)
+
+    @property
+    def chat_id(self) -> str:
+        return self._chat_id
 
     def send_message(self, text: str, *, chat_id: str | None = None) -> TelegramResult:
         target = (chat_id or self._chat_id).strip()
@@ -79,3 +83,25 @@ class TelegramService:
     def send_weekly_summary(self, text: str) -> TelegramResult:
         """주간 수면·식사 요약 전달용 진입점."""
         return self.send_message("📊 HESTIA 주간 생활 요약\n" + text)
+
+    def get_updates(self, offset: int | None = None, timeout: int = 20) -> list[dict]:
+        """Long polling으로 봇 업데이트를 읽는다. 실패하면 빈 목록을 반환한다."""
+        if not self.configured:
+            return []
+        params = {"timeout": str(timeout), "allowed_updates": '["message"]'}
+        if offset is not None:
+            params["offset"] = str(offset)
+        url = (
+            f"https://api.telegram.org/bot{self._bot_token}/getUpdates?"
+            f"{parse.urlencode(params)}"
+        )
+        try:
+            with self._opener(request.Request(url), timeout=timeout + 5) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            if not result.get("ok", False):
+                log.error("Telegram getUpdates 실패: %s", result)
+                return []
+            return result.get("result", [])
+        except Exception:
+            log.exception("Telegram 업데이트 수신 실패")
+            return []
