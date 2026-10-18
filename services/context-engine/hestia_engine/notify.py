@@ -402,11 +402,11 @@ class Notifier:
 
         # 같은 시나리오가 진행 중이면 겹쳐 보내지 않는다
         if self.store.has_open(scenario):
-            log.debug("%s 진행 중 — 발송 생략", scenario)
+            log.info("%s 진행 중 — 발송 생략", scenario)
             return None
 
         if suppression is not None and not suppression.allows(scenario):
-            log.debug("%s 억제됨 (%s)", scenario, suppression.reason)
+            log.info("%s 억제됨 (%s)", scenario, suppression.reason)
             return None
 
         ok, why = self.limits.allows(priority, scenario)      # 알림 총량 조건에서, (현재 알림을 보낼 수 있는지, 그 이유)

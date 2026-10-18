@@ -259,6 +259,37 @@ class Engine:
             self._sched.at(when, self._run_scenarios, key=key)
         self._scenario_timers = set(wanted)
 
+    def on_clock_jump(self, offset: float) -> dict[str, Any]:
+        """시계를 점프시킨다. 시연용 — hestia/sim/clock 이 부른다.
+
+        건너뛴 구간에 예정돼 있던 트리거는 울리지 않은 것으로 한다.
+        """
+        jump = getattr(self._clock, "jump_to", None)
+        if jump is None:
+            raise TypeError("이 시계는 점프를 지원하지 않는다 (DemoClock 이 아니다)")
+
+        before, after = jump(offset)
+        skipped = self._sched.keys_between(before, after)
+
+        # 시나리오 타이머는 tick() 이 매번 통째로 다시 계산하므로 취소할
+        # 필요가 없다. 다만 '그 트리거는 지나갔다' 는 것은 알려줘야 한다.
+        self.scenarios.on_jump(skipped, after, before)
+
+        # 알림 마감·만료는 시나리오가 다시 걸어주지 않는다. 그대로 두면
+        # 에스컬레이션이 단계를 건너뛰며 한 틱에 지나간다.
+        """for key in skipped:
+            if key.startswith("notify-"):
+                self._sched.cancel(key)"""
+
+        # ctx-* 와 전력 확정 대기는 그대로 둔다. 즉시 불려도 하는 일이
+        # recompute 뿐이거나(ctx), 그 시간 유지된 것이 참이다(전력).
+
+        self._publish_all(self.context.recompute())
+        self._run_scenarios()
+        log.info("시계 점프: %.0f → %.0f, 건너뛴 타이머 %d개",
+                 before, after, len(skipped))
+        return {"before": before, "after": after, "skipped": list(skipped)}
+
     def _publish(self, ctx: Context) -> None:
         """hestia/context/{name}, QoS 1, retained.
            seq 가 없다 — retained 라 최신값만 의미가 있다 (명세).

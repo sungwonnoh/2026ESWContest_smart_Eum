@@ -84,6 +84,18 @@ class Scheduler:
     def keys(self) -> tuple[str, ...]:
         return tuple(self._by_key)      #현재 스케줄러에 등록되어 대기 중인 모든 타이머의 고유 키(Key) 이름들을 튜플(Tuple) 형태로 반환
 
+
+    def keys_between(self, lo: float, hi: float) -> tuple[str, ...]:
+        """(lo, hi] 안에 발화 예정인 타이머 키들.
+
+        시계가 점프하면 이 구간의 타이머는 '건너뛴 것' 이다. 취소할지
+        소비된 것으로 칠지는 부르는 쪽이 정한다.
+        """
+        return tuple(
+            key for key, entry in self._by_key.items()
+            if not entry.cancelled and lo < entry.due <= hi
+        )
+
     # -------------------------------------------------------------- 실행
 
     def run_due(self, until: float | None = None) -> int:

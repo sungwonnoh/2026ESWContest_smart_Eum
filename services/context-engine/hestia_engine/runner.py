@@ -26,7 +26,7 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
-from .clock import RealClock
+from .clock import DemoClock
 from .config import Config, ConfigError, load
 from .engine import Engine, MqttPublisher
 from .fsm import FileT0Log
@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 NODE_ID = "rpi5"
 STATUS_TOPIC = f"hestia/node/{NODE_ID}/status"
+SIM_CLOCK_TOPIC = "hestia/sim/clock"
 SCHEMA_VERSION = 1
 
 # RPi5 구독 목록. context 는 구독하지 않는다 —
@@ -73,7 +74,9 @@ class Runner:
         self._port = port
         self._running = False
 
-        self.clock = RealClock()
+        # 시연에서 시계를 점프시킨다 (hestia/sim/clock).
+        # 오프셋 0 이면 RealClock 과 동일하게 동작한다.
+        self.clock = DemoClock()
         self.sched = Scheduler(self.clock)
         self.world = WorldState(self.clock, config, self.sched)
 
@@ -169,6 +172,7 @@ class Runner:
 
         for topic in SUBSCRIBE:     # 구독, RPi5 구독 목록 9개에 대해 구독
             client.subscribe(topic, qos=1)
+        client.subscribe(SIM_CLOCK_TOPIC, qos=1)
         log.info("연결됨 — 구독 %d개", len(SUBSCRIBE))
 
         self._publish_status(online=True)       # 자기 상태 발행 (hestia/node/rpi5/status)
@@ -183,18 +187,47 @@ class Runner:
 
     def _on_message(self, client, userdata, msg) -> None:
         """retain 플래그를 그대로 넘긴다."""
+        if msg.topic == SIM_CLOCK_TOPIC:
+            self._on_sim_clock(msg.payload)
+            return
         try:
             self.engine.ingest(msg.topic, msg.payload, retained=bool(msg.retain))
         except Exception:                             # noqa: BLE001
             # 한 메시지의 문제가 엔진을 멈추게 해서는 안 된다
             log.exception("수신 처리 실패: %s", msg.topic)
 
+    def _on_sim_clock(self, payload: bytes) -> None:
+        """시연용 시계 점프.  {"offset": <초>}
+
+        retained 라 재연결·재시작 때도 현재 오프셋을 받는다. 같은 값이면
+        아무것도 하지 않는다 — 재연결마다 점프가 일어나면 안 된다.
+        """
+        if not payload or not payload.strip():
+            return
+        try:
+            offset = float(json.loads(payload.decode("utf-8"))["offset"])
+        except (UnicodeDecodeError, json.JSONDecodeError,
+                KeyError, TypeError, ValueError):
+            log.warning("시계 점프 페이로드 해석 실패")
+            return
+
+        if offset == getattr(self.clock, "offset", None):
+            return                      # retained 재수신. 이미 그 시각이다
+
+        try:
+            info = self.engine.on_clock_jump(offset)
+        except (TypeError, ValueError) as exc:
+            log.warning("시계 점프 거부: %s", exc)
+            return
+        log.info("시계 점프 offset=%s, 건너뛴 타이머 %d개",
+                 offset, len(info["skipped"]))
+
     # ------------------------------------------------------------ 내부
 
     def _status_payload(self, *, online: bool) -> dict[str, Any]:
         return {
             "version": SCHEMA_VERSION,
-            "sent_ts": int(time.time()),
+            "sent_ts": int(self.clock.now()),
             "src_id": NODE_ID,
             "online": online,
             "ts_synced": True,          # RPi5 는 RTC 와 NTP 가 있다

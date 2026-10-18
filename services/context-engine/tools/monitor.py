@@ -19,6 +19,9 @@ demo-screen.sh (tmux).
 simulate 의 clear 는 hestia/sim/clear 로 온다. retained 삭제는 빈
 페이로드라서 여기서 무시되기 때문에(무시해야 맞다) 신호를 따로 받는다.
 
+simulate 의 clock 은 hestia/sim/clock 으로 온다. 화면에 찍는 '지금' 을
+그만큼 옮긴다 — 메시지에 실린 시각은 이미 가상이므로 건드리지 않는다.
+
 모르는 필드는 번역하지 않고 키=값 그대로 찍는다. 화면에 안 보이는 것보다
 덜 다듬어져 보이는 게 낫다.
 """
@@ -297,6 +300,33 @@ def dur(sec: Any) -> str:
     return f"{s}s"
 
 
+# ─── 가상 시계 ───────────────────────────────────────────────────────────
+# simulate 의 clock 이 바꾼다. 화면에 찍는 '지금' 과 메시지에 실린 시각이
+# 같은 시간대에 있어야 ack_deadline 비교가 성립한다 — 어긋나면 확인이
+# 필요한 알림(낙상)이 뜨자마자 '무응답' 으로 내려간다.
+#
+# 메시지의 시각(hhmmss·hhmm)은 엔진·시뮬레이터가 이미 가상으로 보내므로
+# 여기서 건드리지 않는다. 손댈 것은 모니터가 직접 찍는 '지금' 뿐이다.
+
+_OFFSET = 0.0
+
+
+def now() -> float:
+    return time.time() + _OFFSET
+
+
+def clock_str(fmt: str = "%H:%M:%S") -> str:
+    return time.strftime(fmt, time.localtime(now()))
+
+
+def set_offset(value: float) -> float:
+    """새 오프셋을 넣고 밀린 양(초)을 돌려준다."""
+    global _OFFSET
+    delta = float(value) - _OFFSET
+    _OFFSET = float(value)
+    return delta
+
+
 class View:
     """창 하나. topics() 를 구독하고 handle() 이 찍을 줄을 돌려준다."""
 
@@ -318,6 +348,14 @@ class View:
 
         화면 지우기는 main 이 한다 — 여기서는 상태를 들고 있는 창만
         비우면 된다. 안 비우면 clear 이전 값이 뒤에 섞여 나온다.
+        """
+        return
+
+    def on_jump(self, delta: float) -> None:
+        """시계가 delta 만큼 점프했다. 창이 **자기 시계로 기록한** 값을 민다.
+
+        메시지에 실린 시각은 엔진이 이미 가상 시각으로 보내므로 건드리지
+        않는다. 여기서 밀 것은 모니터가 직접 찍은 것뿐이다.
         """
         return
 
@@ -360,6 +398,7 @@ class InputView(View):
     TEMP_EPS = 0.5
     HUMID_EPS = 3.0
     LUX_EPS = 20.0
+    SETTLE_CM = 40.0
 
     def __init__(self, inv: Inventory) -> None:
         super().__init__(inv)
@@ -376,6 +415,11 @@ class InputView(View):
         # 안 비우면 clear 직후 재발행된 값이 '직전과 같다'로 전부 묻힌다
         self._last.clear()
         self._since.clear()
+
+    def on_jump(self, delta: float) -> None:
+        # 안 밀면 '있음 40초' 가 '4시간' 으로 찍힌다
+        for k in self._since:
+            self._since[k] += delta
 
     def handle(self, topic: str, p: dict) -> list[str]:
         parts = topic.split("/")
@@ -418,7 +462,7 @@ class InputView(View):
 
     def _sensor(self, vid: str, p: dict) -> list[str]:
         t = str(p.get("type", "?"))
-        ts = float(p.get("sent_ts") or time.time())
+        ts = float(p.get("sent_ts") or now())
         name = SENSOR_KO.get(t, t)
         ar = self.inv.area(vid)
         lab = self.inv.label(vid)
@@ -432,6 +476,12 @@ class InputView(View):
                 body = "있음" if val else "없음"
                 held = self._held(vid, val, ts)
                 extra.append(f"신뢰 {p.get('confidence', '-')}")
+                if p.get("target"):
+                    extra.append(f"타깃 {p['target']}")
+                if p.get("dist_spread_cm") is not None:
+                    sp = float(p["dist_spread_cm"])
+                    extra.append(
+                        f"변동 {sp:g}cm [{'정지' if sp < self.SETTLE_CM else '이동'}]")
                 if p.get("energy") is not None:
                     extra.append(f"에너지 {p['energy']}")
                 if p.get("distance_cm"):
@@ -788,7 +838,7 @@ class BoardView(View):
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
         self.meds: list[dict] = []         # registry/medications — 등록된 약
-        self.day = time.strftime("%Y-%m-%d")
+        self.day = clock_str("%Y-%m-%d")
 
     def topics(self) -> list[str]:
         return ["hestia/context/activity", "hestia/context/presence",
@@ -811,7 +861,11 @@ class BoardView(View):
         self.daily = None
         self.count.clear()
         self.meds = []
-        self.day = time.strftime("%Y-%m-%d")
+        self.day = clock_str("%Y-%m-%d")
+
+    def on_jump(self, delta: float) -> None:
+        # 날짜를 넘겨 뛰면 t0 집계 기준도 바뀐다
+        self.day = clock_str("%Y-%m-%d")
 
     def handle(self, topic: str, p: dict) -> list[str]:
         match topic.split("/")[1:]:
@@ -854,15 +908,19 @@ class BoardView(View):
         def row(s: str = "") -> None:
             L.append(f" │ {pad(s, W)} │")
 
-        clock = time.strftime("%H:%M:%S")
+        clock = clock_str()
         row(f"현재 상태{' ' * (W - cols('현재 상태') - len(clock))}{clock}")
         row("─" * W)
         row()
 
         state = str(self.act.get("state", "-"))
-        ar = self.act.get("area") or self.pres.get("user_area")
+        ar = self.pres.get("user_area") or self.act.get("area")
         row(f"  {area(ar)}")
-        row(self._kv(f"  {ACTIVITY_KO.get(state, state)}  ({state})",
+
+        # 활동이 아직 다른 구역에서 판정 중이면 그걸 밝힌다
+        act_ar = self.act.get("area")
+        tail = f"  @{area(act_ar)}" if act_ar and act_ar != ar else ""
+        row(self._kv(f"  {ACTIVITY_KO.get(state, state)}  ({state}){tail}",
                      "", self.act.get("confidence")))
         if self.act.get("since"):
             row(f"  {hhmm(self.act['since'])} 부터")
@@ -970,14 +1028,16 @@ class T0View(View):
             # duration 은 묶음(t0) 길이, eat_t0 는 실제로 먹기 시작한 시각.
             # 둘을 같은 줄에 그냥 두면 모순으로 읽힌다
             if p.get("t0"):
-                span = f"묶음 {hhmm(p['t0'])}"
+                t0 = float(p["t0"])
+                span = f"묶음 {hhmm(t0)}"
                 if p.get("duration_sec"):
-                    span += f" +{dur(p['duration_sec'])}"
+                    span += (f"~{hhmm(t0 + float(p['duration_sec']))}"
+                             f" ({dur(p['duration_sec'])})")
                 bits.append(span)
             elif p.get("duration_sec"):
                 bits.append(dur(p["duration_sec"]))
             if p.get("eat_t0"):
-                bits.append(f"식사 시작 {hhmm(p['eat_t0'])}")
+                bits.append(f"먹기 시작 {hhmm(p['eat_t0'])}")
             # 수면 종료에 '유도'는 뜻이 없다. 식사·수분·복약만
             if t != "sleep_end":
                 bits.append(f"유도 {ko_bool(p.get('prompted'))}")
@@ -1025,6 +1085,10 @@ class DisplayView(View):
         self.acked = ""
         self.last = ""
 
+    def on_jump(self, delta: float) -> None:
+        # 안 밀면 now - cur_at 이 HOLD_SEC 을 넘겨 배너가 즉시 사라진다
+        self.cur_at += delta
+
     # ---- 수신
 
     def handle(self, topic: str, p: dict) -> list[str]:
@@ -1037,7 +1101,7 @@ class DisplayView(View):
 
         if tail == "push":
             self.cur = p
-            self.cur_at = time.time()
+            self.cur_at = now()
             self.speech = ""
             self.acked = ""
             return []
@@ -1056,20 +1120,24 @@ class DisplayView(View):
     def _down(self, why: str) -> None:
         if self.cur is not None:
             scen = self.cur.get("payload", {}).get("title") or self.cur.get("scenario", "")
-            self.last = f"마지막: {scen} — {why} {time.strftime('%H:%M')}"
+            self.last = f"마지막: {scen} — {why} {clock_str('%H:%M')}"
         self.cur = None
         self.speech = ""
         self.acked = ""
 
     def _expire(self) -> None:
+        """ack_deadline 은 엔진이 보낸 **가상** 시각이다. 모니터의 실제
+        시계와 비교하면 가상 시각이 과거일 때 알림이 뜨자마자 '무응답'
+        으로 내려간다 — 확인이 필요한 알림(낙상)이 한 프레임도 안 보인다.
+        """
         if self.cur is None:
             return
-        now = time.time()
+        current = now()
         deadline = self.cur.get("ack_deadline")
-        if self.cur.get("requires_ack") and deadline and now > float(deadline):
+        if self.cur.get("requires_ack") and deadline and current > float(deadline):
             self._down("무응답")
             return
-        if now - self.cur_at > self.HOLD_SEC:
+        if current - self.cur_at > self.HOLD_SEC:
             self._down("표시 종료")
 
     # ---- 그리기
@@ -1106,7 +1174,7 @@ class DisplayView(View):
     def render(self) -> str:
         self._expire()
         W = self.W
-        clock = time.strftime("%H:%M:%S")
+        clock = clock_str()
 
         if self.cur is None:
             body = [""] * 6
@@ -1172,6 +1240,9 @@ CLEAR = "\033[H\033[J"
 # 아무것도 전달되지 않는다 — 빈 건 무시해야 맞으므로 토픽을 따로 둔다
 CLEAR_TOPIC = "hestia/sim/clear"
 
+# simulate 의 clock 이 쏘는 오프셋. retained 라 늦게 켠 창도 따라온다
+CLOCK_TOPIC = "hestia/sim/clock"
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="HESTIA 시연 모니터")
@@ -1197,7 +1268,7 @@ def main() -> int:
     board = view.live
 
     def repaint() -> None:
-        """처음과 clear 때 쓰는 한 장. live 는 그림, 로그는 제목줄."""
+        """처음과 clear·clock 때 쓰는 한 장. live 는 그림, 로그는 제목줄."""
         print(clear + ("" if board else view.banner()), end="", flush=True)
         if board:
             print(view.render(), end="", flush=True)
@@ -1211,6 +1282,7 @@ def main() -> int:
         for t in view.topics():
             client.subscribe(t, qos=0)
         client.subscribe(CLEAR_TOPIC, qos=0)
+        client.subscribe(CLOCK_TOPIC, qos=0)
 
     def on_message(client, userdata, msg):
         # clear 가 먼저다. 빈 페이로드로 와도 받아야 한다
@@ -1220,6 +1292,19 @@ def main() -> int:
             except Exception as exc:
                 print(f"  초기화 실패: {exc}", file=sys.stderr)
             repaint()
+            return
+        # 시계 점프. retained 라 접속 직후에도 한 번 온다
+        if msg.topic == CLOCK_TOPIC:
+            try:
+                delta = set_offset(json.loads(msg.payload.decode("utf-8"))["offset"])
+            except Exception as exc:                  # noqa: BLE001
+                print(f"  시계 해석 실패: {exc}", file=sys.stderr)
+                return
+            try:
+                view.on_jump(delta)
+            except Exception as exc:                  # noqa: BLE001
+                print(f"  점프 처리 실패: {exc}", file=sys.stderr)
+            # repaint()
             return
         # 빈 페이로드는 retained 삭제 신호다 (simulate 의 clear). 조용히 넘긴다
         if not msg.payload or not msg.payload.strip():
