@@ -308,26 +308,7 @@ def test_done_at_none_before(c):
 def test_day_payload_shape(c):
     """명세의 day 페이로드 — 목록 셋."""
     p = c.engine.day_fsm.state.payload(c.clock.now())
-    assert set(p) == {
-        "date", "meals", "hydrations", "medications",
-        "sleep_start", "sleep_end", "sleep_interruptions",
-        "bathroom_visits", "resleep_minutes",
-    }
-
-
-def test_day_payload_contains_sleep_summary(c):
-    day = c.engine.day_fsm
-    day.note_sleep_start(MORNING, ())
-    day.note_sleep_end(MORNING + 3600)
-    day.note_sleep_start(MORNING + 3900, ("bathroom",))
-    day.note_sleep_end(MORNING + 7200)
-
-    payload = day.state.payload(c.clock.now())
-    assert payload["sleep_start"] == MORNING
-    assert payload["sleep_end"] == MORNING + 7200
-    assert payload["sleep_interruptions"] == 1
-    assert payload["bathroom_visits"] == 1
-    assert payload["resleep_minutes"] == [5.0]
+    assert set(p) == {"date", "meals", "hydrations", "medications"}
 
 
 # ============================================================ 실제 시나리오

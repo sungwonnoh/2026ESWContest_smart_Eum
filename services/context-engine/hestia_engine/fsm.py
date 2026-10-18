@@ -353,11 +353,6 @@ class DayState(Context):
     meals: tuple[float, ...] = ()
     hydrations: tuple[float, ...] = ()
     medications: tuple[float, ...] = ()
-    sleep_start: float | None = None
-    sleep_end: float | None = None
-    sleep_interruptions: int = 0
-    bathroom_visits: int = 0
-    resleep_minutes: tuple[float, ...] = ()
 
     def payload(self, now: float) -> dict[str, Any]:
         return {
@@ -365,11 +360,6 @@ class DayState(Context):
             "meals": list(self.meals),
             "hydrations": list(self.hydrations),
             "medications": list(self.medications),
-            "sleep_start": self.sleep_start,
-            "sleep_end": self.sleep_end,
-            "sleep_interruptions": self.sleep_interruptions,
-            "bathroom_visits": self.bathroom_visits,
-            "resleep_minutes": list(self.resleep_minutes),
         }
 
     def same_as(self, other: Context | None) -> bool:
@@ -380,11 +370,6 @@ class DayState(Context):
             and self.meals == other.meals
             and self.hydrations == other.hydrations
             and self.medications == other.medications
-            and self.sleep_start == other.sleep_start
-            and self.sleep_end == other.sleep_end
-            and self.sleep_interruptions == other.sleep_interruptions
-            and self.bathroom_visits == other.bathroom_visits
-            and self.resleep_minutes == other.resleep_minutes
         )
 
 
@@ -406,11 +391,6 @@ class DayFSM:
         self._config = config
         self._world = world
         self._log = t0log
-        self._sleep_start: float | None = None
-        self._last_wake_at: float | None = None
-        self._sleep_interruptions = 0
-        self._bathroom_visits = 0
-        self._resleep_minutes: list[float] = []
         now = clock.now()
         self.state = DayState(name="day", since=now, date=day_key(now))
 
@@ -470,50 +450,6 @@ class DayFSM:
 
     def note_medication(self, prompted: bool = False) -> None:
         self._append("medications", "medication", prompted)
-
-    def note_sleep_start(
-        self, t0: float, awake_areas: tuple[str, ...] | None = None
-    ) -> None:
-        """수면 확정 시 기록한다. 재수면은 야간 각성으로 집계한다."""
-        self._roll_day(t0)
-        is_new_night = (
-            self._sleep_start is None
-            or self._last_wake_at is None
-            or t0 - self._last_wake_at > 3 * 3600
-        )
-        if is_new_night:
-            self._sleep_start = t0
-            self._last_wake_at = None
-            self._sleep_interruptions = 0
-            self._bathroom_visits = 0
-            self._resleep_minutes = []
-        else:
-            self._sleep_interruptions += 1
-            if awake_areas and "bathroom" in awake_areas:
-                self._bathroom_visits += 1
-            self._resleep_minutes.append(max(0.0, (t0 - self._last_wake_at) / 60.0))
-        self.state = _replace(
-            self.state,
-            sleep_start=self._sleep_start,
-            sleep_interruptions=self._sleep_interruptions,
-            bathroom_visits=self._bathroom_visits,
-            resleep_minutes=tuple(self._resleep_minutes),
-        )
-
-    def note_sleep_end(self, t0: float) -> None:
-        """수면 종료 시 현재 날짜의 일별 수면 요약을 갱신한다."""
-        if self._sleep_start is None:
-            return
-        self._roll_day(t0)
-        self._last_wake_at = t0
-        self.state = _replace(
-            self.state,
-            sleep_start=self._sleep_start,
-            sleep_end=t0,
-            sleep_interruptions=self._sleep_interruptions,
-            bathroom_visits=self._bathroom_visits,
-            resleep_minutes=tuple(self._resleep_minutes),
-        )
 
     def done_at(self, kind: str) -> float | None:
         """그 행동을 마지막으로 한 시각. 알림 층의 comply 판정에 쓴다."""
