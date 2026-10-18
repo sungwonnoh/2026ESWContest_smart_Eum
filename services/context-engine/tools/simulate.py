@@ -170,6 +170,7 @@ class Simulator:
             if d.enabled
         }
         self._seq: dict[str, int] = {}
+        self._cmd_seq: int = 0             # 시뮬레이터가 쏘는 cmd 의 cmd_id
         # (적용할 시각, vid, params) — transition_ms 를 블로킹 없이 기다린다
         self._pending: list[tuple[float, str, dict[str, Any]]] = []
         # (실행할 시각, 설명, 함수) — 시나리오 매크로의 단계들
@@ -534,6 +535,33 @@ class Simulator:
             topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=retain
         )
 
+    def _publish_cmd(self, vid: str, device_type: str, action: str,
+                     params: dict[str, Any], *,
+                     reason: str = "USER_MANUAL") -> None:
+        """사용자가 기기를 손으로 조작한 것을 흉내낸다.
+
+        엔진이 쏘는 것과 같은 모양이다 (control.py 의 _publish).
+        ESP32 는 cmd_id / device_type / action 이 비어있지 않은지만 보고
+        (payload.cpp:421) 실제 동작은 params 로 결정한다 — version 과
+        src_id 는 검사하지 않는다.
+        """
+        self._cmd_seq += 1
+        self._publish_raw(
+            f"hestia/device/{vid}/cmd",
+            {
+                "version": SRC_VERSION,
+                "sent_ts": int(self._now()),
+                "src_id": "simulator",
+                "cmd_id": f"sim-{self._cmd_seq}",
+                "device_type": device_type,
+                "action": action,
+                "params": params,
+                "reason": reason,
+                "priority": "normal",
+            },
+            retain=False,                  # control.py 주석: retained 금지
+        )
+
     def _next_seq(self, vid: str) -> int:
         self._seq[vid] = self._seq.get(vid, 0) + 1
         return self._seq[vid]
@@ -600,6 +628,8 @@ class Simulator:
                 self._device_power("smart_tv", args)
             case "light":
                 self._light(args)
+            case "lightstate" | "lights":
+                self._lightstate(args)
             case "fridge":
                 self._fridge(args)
             case "washer":
@@ -768,37 +798,67 @@ class Simulator:
         self._set(vid, power="ON" if on else "OFF")
         print(f"  {vid} power={'ON' if on else 'OFF'}")
 
-    def _light(self, args: list[str]) -> None:
-        """light [area] <0-100|on|off> — area 를 주면 그 구역 조명."""
+    def _light_pick(self, args: list[str]) -> tuple[str | None, list[str]]:
+        """[area] 를 벗겨내고 대상 smart_light 를 고른다."""
         area = None
         if args and args[0] in self._config.areas:
             area, args = args[0], args[1:]
 
-        vid = None
         for d in self._config.all_devices():
             if d.device_type == "smart_light" and d.enabled:
                 if area is None or d.area == area:
-                    vid = d.id
-                    break
-        if vid is None:
-            print(f"smart_light 가 설정에 없음{f' ({area})' if area else ''}")
-            return
+                    return d.id, args
 
+        print(f"smart_light 가 설정에 없음{f' ({area})' if area else ''}")
+        return None, args
+
+    @staticmethod
+    def _light_params(args: list[str]) -> dict[str, Any] | None:
         if not args or args[0] == "off":
-            self._set(vid, power="OFF")
-            print(f"  {vid} power=OFF")
-            return
+            return {"power": "OFF"}
         if args[0] == "on":
-            self._set(vid, power="ON", brightness=100)
-            print(f"  {vid} power=ON brightness=100")
-            return
+            return {"power": "ON", "brightness": 100}
         try:
             level = int(args[0])
         except ValueError:
             print("사용법: light [area] <0-100|on|off>")
+            return None
+        return {"power": "ON" if level else "OFF", "brightness": level}
+
+    def _light(self, args: list[str]) -> None:
+        """light [area] <0-100|on|off> — 사용자가 손으로 조작한 것처럼.
+
+        state 가 아니라 cmd 를 쏜다. LED 를 ESP32 가 들고 있어서, state 를
+        쏘면 브로커만 바뀌고 LED 는 그대로다 — 상황판과 실물이 어긋나고,
+        30초 뒤 ESP32 하트비트가 되돌려 놓는다.
+
+        cmd 를 쏘면 ESP32 가 PWM 을 바꾸고 자기 state 를 올린다. 엔진은
+        '내가 시키지 않은 state 변화' 로 보므로 수동 조작과 같다 —
+        manual_override 와 dim 프로브 응답이 그대로 작동한다.
+        """
+        vid, args = self._light_pick(args)
+        if vid is None:
             return
-        self._set(vid, power="ON" if level else "OFF", brightness=level)
-        print(f"  {vid} brightness={level}")
+        params = self._light_params(args)
+        if params is None:
+            return
+        self._publish_cmd(vid, "smart_light", "set", params)
+        print(f"  → cmd {vid} " + " ".join(f"{k}={v}" for k, v in params.items()))
+
+    def _lightstate(self, args: list[str]) -> None:
+        """lightstate [area] <0-100|on|off> — state 를 직접 쏜다.
+
+        ESP32 없이 맥에서만 돌릴 때 쓴다. 보드가 붙어 있으면 쓰지 말 것 —
+        LED 는 안 바뀌고 30초 뒤 하트비트가 되돌린다.
+        """
+        vid, args = self._light_pick(args)
+        if vid is None:
+            return
+        params = self._light_params(args)
+        if params is None:
+            return
+        self._set(vid, **params)
+        print(f"  {vid} " + " ".join(f"{k}={v}" for k, v in params.items()))
 
     def _fridge(self, args: list[str]) -> None:
         vid = self._first_of_type("smart_fridge")
@@ -1565,7 +1625,8 @@ scenario <이름> — 단계를 시간 간격으로 자동 실행 (abort 로 취
 HELP = """
 가전
   tv [on|off]              TV 전원
-  light [area] <0-100|on|off>
+  light [area] <0-100|on|off>    cmd 로 쏜다 — ESP32 의 LED 가 같이 바뀐다
+  lightstate [area] <0-100|...>  state 를 직접 쏜다. 보드 없이 테스트할 때만
   fridge [open|close]      냉장고 문
   washer [WASH|RINSE|SPIN|DONE]
   clean <start|stop|dock>  로봇 청소기
@@ -1623,7 +1684,7 @@ HELP = """
 
 수면 프로브에 "깨어 있다"고 답하는 길은 셋이다 (scenarios._responded)
   ok                       버튼 — 배너 프로브처럼 알림이 있을 때만
-  light <구역> <밝기>       조명을 되돌림 — dim 프로브
+  light <구역> <밝기>       조명을 되돌림 — dim 프로브 (cmd 경로다. ESP32 가 꺼져 있으면 안 먹는다)
   bed <구역> false          패드 해제 — 일어나 나간 것
       움직임(presence)으로는 안 깨진다. target 에 크기가 없어
       뒤척임과 깨어서 손을 쓰는 것이 구별되지 않기 때문 (2026-10-16)

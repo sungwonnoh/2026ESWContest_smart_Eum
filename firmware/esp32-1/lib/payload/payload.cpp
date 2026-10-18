@@ -76,6 +76,10 @@ std::string deviceStateTopic(const char* virtual_id){
     return t;
 }
 
+std::string deviceEventTopic(const char* virtual_id) {
+    return std::string("hestia/device/") + virtual_id + "/event";
+}
+
 std::string notifyAckTopic(){
     return "hestia/notify/ack";
 }
@@ -476,4 +480,55 @@ std::string buildSmartLightState(const char* src_id, uint32_t seq,
     return out;
 }
 
+
+std::string buildDeviceEvent(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                             const char* device_type, const char* event_type) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+    doc["device_type"] = device_type;
+    doc["source"]      = "esp32";
+    doc["event_type"]  = event_type;
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
+std::string buildDispensed(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                           const char* water_type, uint16_t amount_ml) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+    doc["device_type"] = "water_purifier";
+    doc["source"]      = "esp32";
+    doc["event_type"]  = "dispensed";
+    doc["water_type"]  = water_type;
+    doc["amount_ml"]   = amount_ml;
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
+std::string buildDoorClosed(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                            const char* device_type, float open_duration_sec) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+    doc["device_type"]       = device_type;
+    doc["source"]      = "esp32";
+    doc["event_type"]        = "door_closed";
+    doc["open_duration_sec"] = open_duration_sec;
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
+std::string buildFridgeState(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                             bool open) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+    doc["device_type"] = "smart_fridge";
+    doc["source"]      = "esp32";
+    doc["door"]        = open ? "OPEN" : "CLOSED";
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
 }  // namespace hestia
