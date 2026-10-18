@@ -5,8 +5,8 @@
 Learning Engine은 사용자의 과거 생활 데이터를 기반으로
 개인별 생활 패턴 Baseline을 생성합니다.
 
-현재 MVP에서는 CASAS Aruba의 아침 준비 시각을 이용해
-Gaussian KDE 기반 Meal Baseline을 구현합니다.
+현재 Learning Engine은 CASAS Aruba로 개발·검증할 수 있고, 운영에서는 Context Engine의
+실제 t0 로그로 개인별 `meal_time`, `sleep_time`, `wake_time` baseline을 생성합니다.
 
 현재 목표 질문:
 
@@ -57,7 +57,7 @@ grid_size = 96
 
 각 bin의 density는 전체 합이 약 1.0이 되도록 정규화합니다.
 
-현재 Aruba Breakfast Proxy 기준:
+개발용 Aruba Breakfast Proxy 기준:
 
 ```text
 Observed days : 212
@@ -265,29 +265,30 @@ python3 -m pytest tests/context-engine
 - MQTT / Replay ingest routing
 - A/B Personalized Meal Scenario
 
-## Current Limitation
+## 현재 구현 범위와 한계
 
-현재 학습 데이터는 전체 Meal 패턴이 아니라
-다음 규칙으로 생성한 Breakfast Proxy입니다.
+현재 구현은 다음을 지원합니다.
 
-```text
-05:00 ~ 11:00
-+
-하루 첫 Meal_Preparation begin
-```
+- RPi5의 `hestia/log/t0` JSONL 저장 및 RPi4 학습 입력
+- `meal`의 `t0` 또는 `eat_t0` 기반 식사 시각 학습
+- `sleep_start`/`sleep_end`를 짝짓고 밤잠만 취침·기상 학습
+- 전체 식사 KDE에서 끼니별 peak, `days_ratio`, `meals_per_day` 계산
+- recent weighting, prompted 감쇠, cold-start blending
+- 하루 한 번 batch 학습 후 retained `hestia/model/kde` 발행
 
-따라서 현재 구현은 KDE 구조와 개인화 판단 로직 검증이 목적입니다.
+현재 한계는 데이터 양과 이벤트 품질입니다. 실제 사용자 로그는 CASAS proxy 문제를 줄이지만,
+짧은 기간·오탐·결측·잘못된 이벤트 의미는 해결하지 않습니다. 식사하지 않은 날도 기록하지
+않으면 “식사를 거른 날”과 “데이터가 없는 날”을 구분할 수 없습니다.
 
-향후에는 breakfast / lunch / dinner를 포함한
-전체 `meal_time` multi-modal distribution으로 확장합니다.
+실제 알림 전환 기준은 최소 60~90일 및 끼니별 60개 이상을 권장하며, 최근 데이터를 시간순
+holdout으로 분리해 오탐률과 누락률을 검증해야 합니다. 이는 KDE 계산 최소치가 아니라
+운영 신뢰도 기준입니다.
 
-## Next Step
+## 다음 단계
 
-다음 단계:
-
-1. 실제 RPi4에서 KDE 모델 생성
-2. `hestia/model/kde` Publish
-3. RPi5 Context Engine 수신
-4. retained KDE 모델 재수신 검증
-5. Predictability Threshold 재검증
-6. World State / FSM과 Meal Policy 연결
+1. 실제 RPi4 → MQTT → RPi5 publish 및 retained 재수신 E2E 검증
+2. 실제 사용자 로그의 이벤트 품질·결측·confidence 집계
+3. 평일/주말, 재실/외출, 끼니 종류별 성능 비교
+4. 시간순 holdout 기반 predictability 및 알림 threshold 재검증
+5. 사용자별 baseline 영속 저장과 모델 갱신 이력 관리
+6. World State / FSM과 Meal Policy 통합
