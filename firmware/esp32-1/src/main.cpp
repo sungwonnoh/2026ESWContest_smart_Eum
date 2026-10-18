@@ -12,8 +12,13 @@
 #include "inventory.h"      
 #include "sensors.h"
 #include "devices.h"
+#include "sensors/button.h"
 
 static const char* displayId_ = nullptr;         // setup 에서 결정
+
+// 시연용 시계. 도메인 메시지가 아니라 제어 신호다.
+static const char* SIM_CLOCK_TOPIC = "hestia/sim/clock";
+static bool clockJumped_ = false;                // loop 에서 재발행하라는 표시
 
 static WifiManager wifi(WIFI_SSID, WIFI_PASSWORD);
 static MqttNode    mqtt(wifi, MQTT_HOST, MQTT_PORT);
@@ -26,6 +31,8 @@ static uint32_t lastHeartbeat = 0;
 static uint32_t lastDeviceState = 0;
 
 static const uint32_t DEVICE_STATE_MS = 300000;   // 5분
+
+static ButtonPin ackBtn_;
 
 // ── 발행 ─────────────────────────────────────
 static void publishStatus() {
@@ -178,8 +185,25 @@ static void onDeviceCmd(const char* topic, const char* payload, size_t len) {
     devicesHandleCmd(vid, cmd);
 }
 
+static void onSimClock(const char* payload, size_t len) {
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, len) != DeserializationError::Ok) {
+        logWarn("CLOCK", "parse failed");
+        return;
+    }
+    int32_t off = (int32_t)(double)(doc["offset"] | 0.0);
+    if (off == timeOffset()) {
+        return;                      // retained 재수신. 이미 그 시각이다
+    }
+    timeSetOffset(off);
+    clockJumped_ = true;
+    logInfo("CLOCK", "offset=%ds ts=%lu", (int)off, (unsigned long)nowTs());
+}
+
 static void onMessage(const char* topic, const char* payload, size_t len) {
-    if (strcmp(topic, "hestia/notify/push") == 0) {
+    if (strcmp(topic, SIM_CLOCK_TOPIC) == 0) {
+        onSimClock(payload, len);
+    } else if (strcmp(topic, "hestia/notify/push") == 0) {
         onNotifyPush(payload, len);
     } else if (strcmp(topic, "hestia/notify/cancel") == 0) {
         onNotifyCancel(payload, len);
@@ -250,6 +274,11 @@ void setup() {
 
     consoleBegin(onConsoleLine);
 
+    #ifdef ACK_BUTTON_PIN
+    buttonAttach(ackBtn_, ACK_BUTTON_PIN);
+    logInfo("BOOT", "ack button pin=%d", ACK_BUTTON_PIN);
+    #endif
+
     if (displayId_ != nullptr) {
         logInfo("BOOT", "display_node = %s", displayId_);
     }
@@ -264,6 +293,7 @@ void setup() {
     }
     mqtt.subscribe("hestia/system/profile", 1);
     mqtt.subscribe("hestia/device/+/cmd", 1);
+    mqtt.subscribe(SIM_CLOCK_TOPIC, 1);
 }
 
 void loop() {
@@ -277,6 +307,18 @@ void loop() {
 
     mqtt.tick();
     consoleTick();
+
+    #ifdef ACK_BUTTON_PIN
+    if (buttonPressed(ackBtn_)) {
+        // 콘솔의 seen 과 같은 길. isForMe 로 걸러 들어온 것만 들고 있다
+        const hestia::NotifyPush* top = notifies.latest();
+        if (top != nullptr) {
+            publishAck(top->notify_id, hestia::ACK_SEEN);
+        } else {
+            logInfo("BTN", "ack pressed — no active notify");
+        }
+    }
+    #endif
 
     bool mqttUp = mqtt.isConnected();
     bool tsChanged = timeSyncTick();
@@ -292,6 +334,14 @@ void loop() {
     }
     wasMqttUp = mqttUp;
 
+    if (mqttUp && clockJumped_) {
+        clockJumped_ = false;
+        // retained 에 박힌 옛 sent_ts 를 새 시간대로 갈아끼운다
+        publishStatus();
+        publishAnnounce();
+        sensorsResend();
+    }
+
     if (mqttUp && millis() - lastHeartbeat >= HEARTBEAT_MS) {
         publishStatus();
     }
@@ -300,6 +350,7 @@ void loop() {
         devicesPublishAll();
     }
     sensorsTick();
+    devicesTick();
 
     delay(10);
 }

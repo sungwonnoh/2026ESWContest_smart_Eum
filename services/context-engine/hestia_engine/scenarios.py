@@ -134,7 +134,8 @@ class ScenarioRunner:
         # 복약
         self._med_fired: set[tuple[str, int, str]] = set()   # (med_id, 키, 날짜)
         self._meal_ends: list[tuple[float, float]] = []      # (eat_t0, closed_at)
-        self._refill_day: str | None = None                  # 재처방을 보낸 날
+        self._refill_day: str | None = None                # 재처방을 보낸 날
+        self._med_due_logged: dict[tuple[str, int], str] = {}
 
         # 조명
         self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
@@ -145,6 +146,12 @@ class ScenarioRunner:
 
         # 낙상
         self._safety_answered: dict[str, float] = {}   # 구역 → 응답받은 정지 시작 시각
+
+        # 시계 점프로 건너뛴 구간. 그 안에 예정됐던 복약은 울리지 않은
+        # 것으로 본다 — 점프는 '그 시간을 건너뛴다' 지 '몰아서 한다' 가
+        # 아니다. 구간으로 들고 있어야 점프 뒤 새로 생긴 회차가 안 걸린다.
+        self._jump_from: float = 0.0
+        self._jump_to: float = 0.0
 
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
@@ -169,10 +176,34 @@ class ScenarioRunner:
     def note_hydration(self, amount_ml: int) -> None:
         """정수기 급수. ContextEngine 이 이벤트마다 부른다."""
         now = self._clock.now()
+
+        # _roll_hydration_day 보다 먼저 판정한다 — 날이 바뀌면
+        # _last_notify_at 이 리셋될 수 있다.
+        window = float(self._notify_value(
+            "HYDRATION_PROMPT", "comply_window_min", 30)) * 60.0
+        prompted = (
+            self._last_notify_at is not None
+            and now - self._last_notify_at <= window
+        )
+
         self._roll_hydration_day(now)
         self._last_dispensed_at = now
         self._daily_ml += amount_ml
         self._notify_count = 0          # 마셨으면 반복 카운터를 푼다
+        return prompted
+
+
+    def on_jump(self, skipped: tuple[str, ...], now: float,
+                before: float = 0.0) -> None:
+        self._jump_from = before
+        self._jump_to = now
+        for key in skipped:
+            if key in ("hydration-gap", "hydration-renotify"):
+                self._last_notify_at = now
+            elif key == "hydration-daily":
+                self._daily_short_sent = True
+            elif key == "hydration-return":
+                self._return_sent = True
 
      # ------------------------------------------------------------ SLEEP_ROUTINE
 
@@ -192,7 +223,10 @@ class ScenarioRunner:
             woke_at = self._woke_at(now)
             if woke_at is not None:
                 self._awake_floor = woke_at
-                self._log_sleep("sleep_end", woke_at)
+                self._log_sleep(
+                    "sleep_end", woke_at,
+                    duration_sec=max(0.0, woke_at - self.asleep.since),
+                )
                 self._emit_decision(Decision(
                     kind="sleep", candidate=False, reason="WOKE",
                     factors={"area": self.asleep.area},
@@ -501,12 +535,13 @@ class ScenarioRunner:
         area: str | None = None, method: str | None = None,
         confidence: float | None = None,
         awake_areas: tuple[str, ...] | None = None,
+        duration_sec: float = 0.0,
     ) -> None:
         if self._t0log is None:
             return
         self._t0log.write(T0Entry(
             date=day_key(t0), type=type_, t0=t0,
-            source="sensor", prompted=False, duration_sec=0.0,
+            source="sensor", prompted=False, duration_sec=duration_sec,
             area=area, method=method, confidence=confidence,
             awake_areas=awake_areas,
         ))
@@ -851,8 +886,14 @@ class ScenarioRunner:
                 continue
             if at < reg_min:
                 continue                 # 등록 전에 지나간 시각이다
+            due = now + (at - minutes) * 60.0
+            if self._jump_from < due <= self._jump_to:
+                # 점프로 건너뛴 회차다. 발송하지 않고 소비로 표시한다.
+                self._med_fired.add((med.id, at, today))
+                continue
+
             if minutes < at:
-                out.append(("medication", now + (at - minutes) * 60.0))
+                out.append(("medication", due))
                 continue
             self._send_medication(context, med, at, now, today)
 
@@ -876,7 +917,10 @@ class ScenarioRunner:
         out: list[tuple[str, float]] = []
 
         for peak in sorted(peaks, key=lambda p: p.from_)[:limit]:
+            mark = (med.id, peak.center)
+
             if (med.id, peak.center, today) in self._med_fired:
+                self._note_med(mark, med.name, "이미 소비")
                 continue
 
             end = self._meal_end_in(peak, today)
@@ -885,11 +929,18 @@ class ScenarioRunner:
             if reg_at > 0.0 and end < reg_at:
                 continue                 # 등록 전에 끝난 끼니다
 
-            if now >= end + delay:
+            due = end + delay
+            at = datetime.fromtimestamp(due, KST).strftime("%H:%M")
+            if self._jump_from < due <= self._jump_to:
+                self._note_med(mark, med.name, f"{at} 점프로 건너뜀")
+                self._med_fired.add((med.id, peak.center, today))
+                continue
+
+            if now >= due:
                 self._send_medication(context, med, peak.center, now, today)
             else:
-                out.append(("medication", end + delay))
-
+                self._note_med(mark, med.name, f"{at} 예약")
+                out.append(("medication", due))
         return out
         
 
@@ -942,6 +993,12 @@ class ScenarioRunner:
 
     def _med_cfg(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "medication", key, default=default)
+
+    def _note_med(self, mark: tuple[str, int], name: str, msg: str) -> None:
+        """같은 상태를 반복해서 찍지 않는다 — tick 마다 돌기 때문."""
+        if self._med_due_logged.get(mark) != msg:
+            self._med_due_logged[mark] = msg
+            log.info("식후 복약 %s — %s", name, msg)
 
 
     # ------------------------------------------------------------ REFILL_PROMPT
@@ -1117,6 +1174,11 @@ class ScenarioRunner:
         if not lights:
             return []
         vid = lights[0]
+
+        st = self._world.device(vid)
+        if st is None or st.get("power") != "ON":
+            self._dl = None            # 시스템이 더한 몫을 잊는다
+            return []
 
         # 다른 시나리오가 쥐고 있거나 사용자가 손댔다
         cmd = self._controller.last_for(vid)

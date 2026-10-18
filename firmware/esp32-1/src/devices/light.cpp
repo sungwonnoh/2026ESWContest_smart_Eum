@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <cstring>
 
-static const uint8_t  MAX_LIGHTS  = 2;
+static const uint8_t  MAX_LIGHTS  = 4;
 static const uint32_t PWM_FREQ    = 5000;
 static const uint8_t  PWM_BITS    = 8;      // 0~255
 
