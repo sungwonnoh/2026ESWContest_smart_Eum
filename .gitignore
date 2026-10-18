@@ -15,6 +15,11 @@ vendor/
 data/raw/
 logs/
 
+# Reproducible synthetic persona fixtures are safe to distribute.
+!data/synthetic/
+!data/synthetic/*.sqlite
+!data/synthetic/**/*.jsonl
+
 # Python
 .venv/
 venv/
