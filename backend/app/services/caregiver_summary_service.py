@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Callable
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
-from typing import Callable
 
 from ..repositories.history_repository import HistoryRepository
 from .telegram_service import TelegramResult, TelegramService
@@ -46,7 +46,7 @@ class CaregiverSummaryService:
                 f"식사 횟수 분포: {distribution}",
             ])
 
-                # 완료된 SLEEPING 구간을 기상일 기준으로 조회한다.
+        # 완료된 SLEEPING 구간을 기상일 기준으로 조회한다.
         tz = ZoneInfo("Asia/Seoul")
         since_ts = datetime.combine(
             start, time.min, tzinfo=tz

@@ -239,7 +239,7 @@ class HistoryRepository:
         self,
         since_ts: float,
         until_ts: float,
-        ) -> list[ContextRecord]:
+    ) -> list[ContextRecord]:
         """종료 시각이 조회 기간에 포함되는 완료된 수면 구간 조회."""
         rows = self._db.query(
             "SELECT * FROM context_history "
