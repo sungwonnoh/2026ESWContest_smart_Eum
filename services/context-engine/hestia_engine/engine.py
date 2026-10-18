@@ -165,6 +165,7 @@ class Engine:
             controller=self.controller, publish=self._publish_raw,
             suppression=self.context._suppression_eval,
             t0log=t0log,
+            day_fsm=self.context.day_fsm,
         )
         self.context._on_hydration = self.scenarios.note_hydration
         self.context._on_meal_close = self.scenarios.note_meal_closed
@@ -252,7 +253,13 @@ class Engine:
         """시나리오를 돌리고 타이머를 다시 건다.
            직전에 걸었던 것 중 이번 목록에 없는 키는 취소한다 — 사람이 화장실을 나가면 그 타이머는 의미가 없다.
         """
+        day_before = self.context.day_fsm.state
         wanted = dict(self.scenarios.tick(self.context))
+        day_after = self.context.day_fsm.state
+        if not day_after.same_as(day_before):
+            # sleep_end/sleep_start는 시나리오 판정 중 갱신되므로
+            # 같은 입력 사이클에 최신 sleep summary도 발행한다.
+            self._publish(day_after)
         for key in self._scenario_timers - set(wanted):
             self._sched.cancel(key)
         for key, when in wanted.items():
