@@ -41,6 +41,52 @@ API 문서: http://localhost:8000/docs
 | `HESTIA_SRC_ID` | `rpi5-api` | API 가 발행하는 메시지의 `src_id` |
 | `HESTIA_DB_PATH` | `hestia.db` | SQLite 파일 (`*.db` 는 git 제외) |
 | `HESTIA_DEVICE_STALE_SEC` | `900` | 이 시간 동안 보고 없으면 가전 offline |
+| `HESTIA_TELEGRAM_ENABLED` | `0` | Telegram 보호자 알림 활성화 |
+| `HESTIA_TELEGRAM_BOT_TOKEN` | 빈 값 | BotFather가 발급한 봇 토큰 |
+| `HESTIA_TELEGRAM_CHAT_ID` | 빈 값 | 보호자 Telegram 대화방 ID |
+| `HESTIA_TELEGRAM_TIMEOUT_SEC` | `10` | Telegram API 요청 제한 시간 |
+| `HESTIA_TELEGRAM_WEEKLY_ENABLED` | `0` | 주간 자동 요약 활성화 |
+| `HESTIA_TELEGRAM_WEEKLY_WEEKDAY` | `6` | 자동 발송 요일 (월요일 0, 일요일 6) |
+| `HESTIA_TELEGRAM_WEEKLY_HOUR` | `18` | 자동 발송 시각(로컬 시간) |
+| `HESTIA_TELEGRAM_WEEKLY_MINUTE` | `0` | 자동 발송 분 |
+
+Telegram 1차 정책은 다음과 같다.
+
+- 낙상/안전 알림의 최초 사용자 확인(`괜찮으신가요?`)은 집 안 채널로만 보낸다.
+- 사용자가 확인하지 않아 Context Engine이 `escalation_level >= 2`로 올린 안전 알림만 Telegram으로 즉시 보낸다.
+- Telegram 장애는 MQTT 수신과 앱 알림을 막지 않는다.
+- 수면·식사 주간 요약은 요약 산출기와 스케줄러를 연결한 뒤 `TelegramService.send_weekly_summary()`를 통해 보낸다. 현재 단계에서는 원천 데이터가 없는데 임의의 요약을 만들지 않는다.
+- 보호자가 즉시 요약을 요청할 때는 `POST /api/v1/caregiver/summary`에 `{"days": 1}` 또는 원하는 기간을 보낸다.
+- 보호자는 봇에서 `/today`, `/week`, `/summary 3` 명령으로 같은 요약을 요청할 수 있다. 등록된 `HESTIA_TELEGRAM_CHAT_ID` 외의 대화는 무시한다.
+- 주간 자동 발송은 `HESTIA_TELEGRAM_WEEKLY_ENABLED=1`로 켜며 기본 일요일 18:00에 전송한다. 봇 프로세스가 재시작되면 해당 실행 중의 스케줄만 다시 관리한다.
+- 현재 `day` 기록으로 식사 횟수·분포를 집계한다. 수면 요약은 Context Engine이 `sleep_interruptions`/`bathroom_visits` 같은 일별 필드를 보내는 경우에만 집계한다.
+
+예시:
+
+```bash
+export HESTIA_TELEGRAM_ENABLED=1
+export HESTIA_TELEGRAM_BOT_TOKEN='<BotFather token>'
+export HESTIA_TELEGRAM_CHAT_ID='<caregiver chat id>'
+```
+
+GitHub에는 토큰을 올리지 않는다. Mac에서 이 저장소를 push할 때는
+`deploy/backend.env.sample`만 올리고, WSL/RPi에서 다음처럼 실제 파일을 만든다.
+
+```bash
+sudo mkdir -p /etc/hestia
+sudo cp deploy/backend.env.sample /etc/hestia/backend.env
+sudo nano /etc/hestia/backend.env
+sudo chmod 600 /etc/hestia/backend.env
+```
+
+Backend를 직접 실행할 때는 시작 전에 환경변수를 읽는다.
+
+```bash
+set -a
+source /etc/hestia/backend.env
+set +a
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
 ## API
 
@@ -61,6 +107,7 @@ API 문서: http://localhost:8000/docs
 | GET/POST | `/api/v1/medications` | 복약 일정 조회/추가 (추가는 201) |
 | PUT/DELETE | `/api/v1/medications/{id}` | 복약 일정 수정/삭제 (없으면 404, 삭제는 204) |
 | GET | `/api/v1/weather` | 외부 날씨 최신값 (아직 못 받았으면 404) |
+| POST | `/api/v1/caregiver/summary` | 지정 기간의 생활 요약을 생성하고 Telegram으로 즉시 전송 |
 | WS | `/ws/monitor` | 접속 시 `snapshot`, 이후 MQTT 이벤트 실시간 전달 |
 
 ### 가전 ↔ MQTT 장치 연결

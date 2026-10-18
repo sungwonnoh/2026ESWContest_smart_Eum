@@ -21,6 +21,7 @@ from ..schemas.notification import (
     NotifyPushPayload,
 )
 from .context_service import iso
+from .telegram_service import TelegramService
 
 log = logging.getLogger(__name__)
 
@@ -79,12 +80,14 @@ class NotificationService:
         src_id: str,
         area_of: Callable[[str], str | None] = lambda vid: None,
         clock: Callable[[], float] = time.time,
+        telegram: TelegramService | None = None,
     ) -> None:
         self._history = history
         self._publisher = publisher
         self._src_id = src_id
         self._area_of = area_of
         self._clock = clock
+        self._telegram = telegram
 
     # ------------------------------------------------------------ MQTT 입력
 
@@ -110,7 +113,23 @@ class NotificationService:
             explanation_id=None,
             created_at=float(p.sent_ts),
         )
-        return record if self._history.add_notification(record, raw) else None
+        if not self._history.add_notification(record, raw):
+            return None
+
+        # 첫 사용자 확인 알림은 보호자에게 보내지 않는다. Context Engine이
+        # 무응답으로 다음 단계에 올린 SAFETY만 보호자 채널로 전달한다.
+        if (
+            self._telegram is not None
+            and record.type == "SAFETY"
+            and (p.escalation_level or 0) >= 2
+        ):
+            self._telegram.send_fall_escalation(
+                title=record.title,
+                message=record.message,
+                notify_id=record.id,
+                sent_ts=float(p.sent_ts),
+            )
+        return record
 
     def on_ack(self, ack: NotifyAckPayload, recv_ts: float) -> bool:
         """채널 노드의 ACK 를 반영한다. 모르는 알림이면 False.

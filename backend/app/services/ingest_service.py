@@ -216,6 +216,8 @@ class IngestService:
     def _on_context(self, name: str, payload: dict[str, Any]) -> None:
         model = CONTEXT_SCHEMAS[name].model_validate(payload)
         self._cache.set_context(name, model, payload)
+        if name == "day":
+            self._history.record_day(payload, float(model.sent_ts))
         domain = to_domain(model)
         # suppression 은 플래그 집합, day 는 하루 기록 — 판단 결과가 아니라 이력·설명에서 뺀다
         if name not in NOT_JUDGMENTS:

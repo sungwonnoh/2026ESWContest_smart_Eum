@@ -14,12 +14,15 @@ from .repositories.history_repository import HistoryRepository
 from .repositories.medication_repository import MedicationRepository
 from .repositories.preference_repository import PreferenceRepository
 from .services.context_service import ExplanationService, StateCache
+from .services.caregiver_summary_service import CaregiverSummaryService
+from .services.caregiver_bot_service import CaregiverBotService
 from .services.device_service import DeviceService
 from .services.ingest_service import SUBSCRIPTIONS, IngestService
 from .services.medication_service import MedicationService
 from .services.monitor_service import MonitorHub
 from .services.mqtt_service import MqttService, NullMqttService
 from .services.notification_service import NotificationService
+from .services.telegram_service import TelegramService
 from .services.weather_service import WeatherService
 
 
@@ -39,6 +42,8 @@ class Container:
     ingest: IngestService
     weather: WeatherService
     mqtt: Any  # MqttService | NullMqttService | 테스트용 가짜
+    caregiver_summary: CaregiverSummaryService
+    caregiver_bot: CaregiverBotService
 
 
 def build_container(settings: Settings, mqtt: Any = None) -> Container:
@@ -55,8 +60,24 @@ def build_container(settings: Settings, mqtt: Any = None) -> Container:
     cache = StateCache()
     monitor = MonitorHub()
     devices = DeviceService(device_repo, cache, settings.device_stale_sec)
+    telegram = TelegramService(
+        settings.telegram_enabled,
+        settings.telegram_bot_token,
+        settings.telegram_chat_id,
+        settings.telegram_timeout_sec,
+    )
     notifications = NotificationService(history, mqtt, settings.src_id,
-                                        area_of=cache.registry_area)
+                                        area_of=cache.registry_area,
+                                        telegram=telegram)
+    caregiver_summary = CaregiverSummaryService(history, telegram)
+    caregiver_bot = CaregiverBotService(
+        telegram,
+        caregiver_summary,
+        settings.telegram_weekly_enabled,
+        settings.telegram_weekly_weekday,
+        settings.telegram_weekly_hour,
+        settings.telegram_weekly_minute,
+    )
     weather = WeatherService(mqtt, settings.src_id)
     ingest = IngestService(cache, history, devices, notifications, monitor, weather)
     mqtt.set_handler(ingest.handle)
@@ -79,6 +100,8 @@ def build_container(settings: Settings, mqtt: Any = None) -> Container:
         ingest=ingest,
         weather=weather,
         mqtt=mqtt,
+        caregiver_summary=caregiver_summary,
+        caregiver_bot=caregiver_bot,
     )
 
 
