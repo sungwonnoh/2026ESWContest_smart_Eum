@@ -15,8 +15,8 @@ from typing import Any, Optional
 
 from fastapi import FastAPI
 
-from .api import (context, devices, explanations, health, medications, notifications,
-                  preferences, rooms, setup, weather)
+from .api import (caregiver, context, devices, explanations, health, medications,
+                  notifications, preferences, rooms, setup, weather)
 from .config import API_VERSION, Settings
 from .dependencies import build_container
 from .realtime import monitor_ws
@@ -34,9 +34,11 @@ def create_app(settings: Optional[Settings] = None, mqtt: Any = None) -> FastAPI
         container.monitor.attach_loop(asyncio.get_running_loop())
         app.state.hestia = container
         container.mqtt.start()
+        container.caregiver_bot.start()
         try:
             yield
         finally:
+            container.caregiver_bot.stop()
             container.mqtt.stop()
             container.db.close()
 
@@ -46,7 +48,7 @@ def create_app(settings: Optional[Settings] = None, mqtt: Any = None) -> FastAPI
         description="Flutter 와 Context Engine/MQTT 사이의 Backend Adapter",
         lifespan=lifespan,
     )
-    for module in (health, rooms, devices, context, notifications,
+    for module in (health, rooms, devices, context, notifications, caregiver,
                    explanations, preferences, setup, medications, weather):
         app.include_router(module.router, prefix=API_PREFIX)
     app.include_router(monitor_ws.router)

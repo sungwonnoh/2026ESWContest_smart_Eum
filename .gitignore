@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+!.env.sample
+
+# Local backend secret copied from deploy/backend.env.sample
+deploy/backend.env
 
 # local/vendor files
 atlas_docker-env/
