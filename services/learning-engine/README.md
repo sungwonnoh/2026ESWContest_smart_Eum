@@ -21,7 +21,7 @@ Context Engine이 판단할 때 쓰는 "이 사람의 평소 시간 패턴"을 �
 
 ## 데이터 출처
 
-실제 Context Engine t0 로그가 쌓이기 전까지 공개 데이터(CASAS)로 개발·검증합니다.
+개발·검증에는 CASAS 데이터를 사용하고, 운영에서는 RPi5 Context Engine이 남긴 t0 로그를 RPi4에서 학습합니다.
 
 | 출처 | 모듈 | 분포 | 비고 |
 |---|---|---|---|
@@ -36,6 +36,17 @@ Context Engine이 판단할 때 쓰는 "이 사람의 평소 시간 패턴"을 �
 aruba.py / casas.py ─┐
 t0 adapter          ─┴─→ KdeSample ─→ fit_distribution ─→ density + predictability
 ```
+
+운영 흐름:
+
+```text
+RPi5 hestia/log/t0 → hestia-t0-logger → data/t0_log.jsonl
+                   → hestia-learning.timer (하루 1회)
+                   → hestia/model/kde (retained MQTT)
+```
+
+로그가 없으면 새 모델을 발행하지 않고 기존 모델을 유지합니다. 운영 실행 스크립트는
+Aruba 데이터를 자동으로 사용하지 않으므로 다른 사용자의 패턴이 잘못 발행되지 않습니다.
 
 ## 식사: 학습 시각 (t0 / eat_t0)
 
@@ -261,6 +272,23 @@ build_model(
 - 가중치를 쓰면 bandwidth도 유효 표본 수(Kish) 기준으로 계산됩니다 (`meta[...]["weighting"]["effective_samples"]`).
 - prior는 외부에서 주입합니다. prior가 없는 distribution은 개인 분포를 그대로 씁니다.
 - predictability는 섞은 뒤의 최종 density로 계산합니다.
+
+## 데이터 충분성 및 운영 전환 기준
+
+KDE 계산에는 분포별 최소 2개 표본이면 충분하지만, 이는 수학적 하한일 뿐 실제 알림을
+신뢰할 수 있다는 뜻은 아닙니다.
+
+| 단계 | 권장 기준 |
+|---|---|
+| 파이프라인·payload 검증 | 분포별 2개 이상 |
+| 초기 개인화 확인 | 전체 30일 이상, 끼니별 30개 이상 |
+| 실제 알림 판단 시작 | 전체 60~90일, 끼니별 60개 이상 |
+| 안정적인 개인 baseline | 가능하면 3~6개월 |
+
+실제 사용자 로그를 넣으면 CASAS의 proxy 문제와 개인별 데이터 부족 문제는 줄어듭니다.
+하지만 기간이 짧거나 이벤트 품질이 낮으면 자동으로 해결되지 않습니다. 식사 준비와 실제
+섭취의 구분, 수면 이벤트 짝짓기, 결측·오탐·confidence, 재실/외출, 평일/주말을 함께
+검증해야 합니다. 최근 데이터는 시간순 holdout으로 분리해 오탐률·누락률을 확인합니다.
 
 ## 역할 분담
 
