@@ -134,7 +134,7 @@ class ScenarioRunner:
         # 복약
         self._med_fired: set[tuple[str, int, str]] = set()   # (med_id, 키, 날짜)
         self._meal_ends: list[tuple[float, float]] = []      # (eat_t0, closed_at)
-        self._refill_day: str | None = None                  # 재처방을 보낸 날
+        self._refill_day: str | None = None                # 재처방을 보낸 날
 
         # 조명
         self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
@@ -145,6 +145,12 @@ class ScenarioRunner:
 
         # 낙상
         self._safety_answered: dict[str, float] = {}   # 구역 → 응답받은 정지 시작 시각
+
+        # 시계 점프로 건너뛴 구간. 그 안에 예정됐던 복약은 울리지 않은
+        # 것으로 본다 — 점프는 '그 시간을 건너뛴다' 지 '몰아서 한다' 가
+        # 아니다. 구간으로 들고 있어야 점프 뒤 새로 생긴 회차가 안 걸린다.
+        self._jump_from: float = 0.0
+        self._jump_to: float = 0.0
 
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
@@ -175,20 +181,12 @@ class ScenarioRunner:
         self._notify_count = 0          # 마셨으면 반복 카운터를 푼다
 
 
-    def on_jump(self, skipped: tuple[str, ...], now: float) -> None:
-        """건너뛴 구간에 예정돼 있던 트리거를 '지나간 것' 으로 친다.
-
-        시연에서 시간을 점프할 때 부른다. 점프는 그 시간을 건너뛴다는
-        뜻이지, 그 시간에 울렸어야 할 알림을 지금 몰아서 낸다는 뜻이
-        아니다 — 정숙 시간이 쌓인 1회성 조건을 버리는 것과 같은 이유로,
-        사용자가 '왜 지금' 을 알 수 없다.
-
-        키 이름이 곧 어떤 트리거였는지를 말해준다 (_hydration_timers).
-        """
+    def on_jump(self, skipped: tuple[str, ...], now: float,
+                before: float = 0.0) -> None:
+        self._jump_from = before
+        self._jump_to = now
         for key in skipped:
             if key in ("hydration-gap", "hydration-renotify"):
-                # 보낸 셈 친다. renotify_sec 뒤에 다시 평가된다 —
-                # 영영 막는 것이 아니다.
                 self._last_notify_at = now
             elif key == "hydration-daily":
                 self._daily_short_sent = True
@@ -872,8 +870,14 @@ class ScenarioRunner:
                 continue
             if at < reg_min:
                 continue                 # 등록 전에 지나간 시각이다
+            due = now + (at - minutes) * 60.0
+            if self._jump_from < due <= self._jump_to:
+                # 점프로 건너뛴 회차다. 발송하지 않고 소비로 표시한다.
+                self._med_fired.add((med.id, at, today))
+                continue
+
             if minutes < at:
-                out.append(("medication", now + (at - minutes) * 60.0))
+                out.append(("medication", due))
                 continue
             self._send_medication(context, med, at, now, today)
 
@@ -906,10 +910,15 @@ class ScenarioRunner:
             if reg_at > 0.0 and end < reg_at:
                 continue                 # 등록 전에 끝난 끼니다
 
-            if now >= end + delay:
+            due = end + delay
+            if self._jump_from < due <= self._jump_to:
+                self._med_fired.add((med.id, peak.center, today))
+                continue
+
+            if now >= due:
                 self._send_medication(context, med, peak.center, now, today)
             else:
-                out.append(("medication", end + delay))
+                out.append(("medication", due))
 
         return out
         
