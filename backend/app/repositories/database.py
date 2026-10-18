@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS context_history (
 CREATE INDEX IF NOT EXISTS ix_context_history_name
     ON context_history (context_name, started_at);
 
+-- 하루 단위 활동 기록. 주간 보호자 요약의 원천이며 원시 센서 로그는 저장하지 않는다.
+CREATE TABLE IF NOT EXISTS daily_activity (
+    date          TEXT PRIMARY KEY,
+    meals_json    TEXT NOT NULL DEFAULT '[]',
+    hydrations_json TEXT NOT NULL DEFAULT '[]',
+    medications_json TEXT NOT NULL DEFAULT '[]',
+    payload_json  TEXT NOT NULL,
+    updated_at    REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_preferences (
     id                    INTEGER PRIMARY KEY CHECK (id = 1),
     notification_enabled  INTEGER NOT NULL,
