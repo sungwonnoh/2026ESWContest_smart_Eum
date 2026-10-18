@@ -235,6 +235,23 @@ class HistoryRepository:
             (limit,),
         )
         return [_context(r) for r in rows]
+    def list_completed_sleep(
+        self,
+        since_ts: float,
+        until_ts: float,
+    ) -> list[ContextRecord]:
+        """종료 시각이 조회 기간에 포함되는 완료된 수면 구간 조회."""
+        rows = self._db.query(
+            "SELECT * FROM context_history "
+            "WHERE context_name = ? "
+            "AND state = ? "
+            "AND ended_at IS NOT NULL "
+            "AND ended_at >= ? AND ended_at < ? "
+            "AND ended_at > started_at "
+            "ORDER BY ended_at ASC",
+            ("activity", "SLEEPING", since_ts, until_ts),
+        )
+        return [_context(row) for row in rows]
 
     # ------------------------------------------------------------ outcomes
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Callable
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from ..repositories.history_repository import HistoryRepository
 from .telegram_service import TelegramResult, TelegramService
@@ -45,26 +46,93 @@ class CaregiverSummaryService:
                 f"식사 횟수 분포: {distribution}",
             ])
 
-        sleep_rows = [
-            by_date[d.isoformat()].payload
-            for d in (start + timedelta(days=i) for i in range(days))
-            if d.isoformat() in by_date and _has_sleep_fields(by_date[d.isoformat()].payload)
-        ]
-        if sleep_rows:
-            interruptions = [
-                float(row.get("sleep_interruptions", row.get("night_awakenings", 0)))
-                for row in sleep_rows
-            ]
-            bathroom = [
-                float(row.get("bathroom_visits", row.get("night_bathroom_visits", 0)))
-                for row in sleep_rows
-            ]
+        # 완료된 SLEEPING 구간을 기상일 기준으로 조회한다.
+        tz = ZoneInfo("Asia/Seoul")
+        since_ts = datetime.combine(
+            start, time.min, tzinfo=tz
+        ).timestamp()
+        until_ts = datetime.combine(
+            end + timedelta(days=1), time.min, tzinfo=tz
+        ).timestamp()
+
+        sleep_records = self._history.list_completed_sleep(
+            since_ts, until_ts
+        )
+
+        night_sleep_minutes = 0
+        nap_minutes = 0
+        night_count = 0
+        nap_count = 0
+
+        for record in sleep_records:
+            if record.ended_at is None:
+                continue
+
+            duration_min = (
+                record.ended_at - record.started_at
+            ) / 60
+
+            started = datetime.fromtimestamp(
+                record.started_at, tz
+            )
+
+            # 야간 수면 시간대: 20:00 ~ 다음 날 09:00
+            is_night = (
+                started.hour >= 20
+                or started.hour < 9
+            )
+
+            if is_night:
+                night_sleep_minutes += duration_min
+                night_count += 1
+            else:
+                nap_minutes += duration_min
+                nap_count += 1
+
+        if sleep_records:
             lines.append(
-                f"수면: {len(sleep_rows)}박 기록, 평균 야간 각성 {sum(interruptions) / len(interruptions):.1f}회, "
-                f"평균 야간 화장실 {sum(bathroom) / len(bathroom):.1f}회"
+                f"수면: 야간 수면 {night_count}회 "
+                f"(총 {night_sleep_minutes / 60:.1f}시간), "
+                f"낮잠 {nap_count}회 "
+                f"(총 {nap_minutes:.0f}분)"
             )
         else:
             lines.append("수면: 수면 요약 원천 데이터가 아직 수집되지 않았습니다.")
+
+        # 기존 daily_activity 기반 야간 각성·화장실 횟수 유지
+        sleep_rows = [
+            by_date[d.isoformat()].payload
+            for d in (start + timedelta(days=i) for i in range(days))
+            if d.isoformat() in by_date
+            and _has_sleep_fields(by_date[d.isoformat()].payload)
+        ]
+
+        if sleep_rows:
+            interruptions = [
+                float(
+                    row.get(
+                        "sleep_interruptions",
+                        row.get("night_awakenings", 0),
+                    )
+                )
+                for row in sleep_rows
+            ]
+            bathroom = [
+                float(
+                    row.get(
+                        "bathroom_visits",
+                        row.get("night_bathroom_visits", 0),
+                    )
+                )
+                for row in sleep_rows
+            ]
+
+            lines.append(
+                f"수면 상세: 평균 야간 각성 "
+                f"{sum(interruptions) / len(interruptions):.1f}회, "
+                f"평균 야간 화장실 "
+                f"{sum(bathroom) / len(bathroom):.1f}회"
+            )
         return "\n".join(lines)
 
     def send(self, days: int = 7) -> TelegramResult:
