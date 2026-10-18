@@ -69,6 +69,25 @@ export HESTIA_TELEGRAM_BOT_TOKEN='<BotFather token>'
 export HESTIA_TELEGRAM_CHAT_ID='<caregiver chat id>'
 ```
 
+GitHub에는 토큰을 올리지 않는다. Mac에서 이 저장소를 push할 때는
+`deploy/backend.env.sample`만 올리고, WSL/RPi에서 다음처럼 실제 파일을 만든다.
+
+```bash
+sudo mkdir -p /etc/hestia
+sudo cp deploy/backend.env.sample /etc/hestia/backend.env
+sudo nano /etc/hestia/backend.env
+sudo chmod 600 /etc/hestia/backend.env
+```
+
+Backend를 직접 실행할 때는 시작 전에 환경변수를 읽는다.
+
+```bash
+set -a
+source /etc/hestia/backend.env
+set +a
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
 ## API
 
 | Method | Path | 설명 |
