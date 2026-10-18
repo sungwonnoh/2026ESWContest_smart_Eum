@@ -4,7 +4,7 @@
 #include <cstdlib>
 
 static const uint8_t MAX_SENSORS = 8;
-static const uint8_t MAX_DEVICES = 4;
+static const uint8_t MAX_DEVICES = 8;
 
 // 플래그 문자열의 복사본. strtok 가 원본을 수정하므로 리터럴을 직접 쪼갤 수 없고,
 // 쪼갠 조각들의 주소를 아래 배열이 계속 들고 있으므로 static 이어야 한다.

@@ -18,6 +18,7 @@ uint8_t      qosFor(SensorType type);
 bool         isRetained(SensorType type);
 std::string   sensorStateTopic(const char* virtual_id);
 std::string deviceStateTopic(const char* virtual_id);
+std::string deviceEventTopic(const char* virtual_id);
 std::string notifyAckTopic();
 
 struct PresenceReading {
@@ -47,7 +48,7 @@ std::string buildDisplayState(const char* src_id, uint32_t seq, uint32_t sent_ts
 
 class SeqCounter {
 public:
-    static const uint8_t MAX_IDS = 8;
+    static const uint8_t MAX_IDS = 12;
 
     SeqCounter();
     
@@ -162,4 +163,20 @@ std::string buildSmartLightState(const char* src_id, uint32_t seq,
                                  bool has_brightness, uint8_t brightness,
                                  bool has_color_temp, uint16_t color_temp);
 
+
+// ── 가전 이벤트 ──────────────────────────────
+std::string buildDeviceEvent(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                             const char* device_type, const char* event_type);
+
+std::string buildDispensed(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                           const char* water_type, uint16_t amount_ml);
+
+// 닫을 때 실제로 열려 있던 시간을 싣는다. 고정값이면 '문을 오래 열어둔
+// 이상' 을 판정할 방법이 없다.
+std::string buildDoorClosed(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                            const char* device_type, float open_duration_sec);
+
+std::string buildFridgeState(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                             bool open);
 }  // namespace hestia
+

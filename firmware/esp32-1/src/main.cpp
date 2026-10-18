@@ -350,6 +350,7 @@ void loop() {
         devicesPublishAll();
     }
     sensorsTick();
+    devicesTick();
 
     delay(10);
 }
