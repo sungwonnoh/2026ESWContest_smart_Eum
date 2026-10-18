@@ -246,6 +246,7 @@ class Simulator:
         if reason_code != 0:
             print(f"연결 거부 rc={reason_code}")
             return
+        client.subscribe(CLOCK_TOPIC, qos=1)
         client.subscribe("hestia/device/+/cmd", qos=1)
         if self._watch:
             for topic, qos in WATCH_TOPICS:
@@ -259,6 +260,10 @@ class Simulator:
 
     def _on_message(self, client, userdata, msg) -> None:
         topic = msg.topic
+
+        if topic == CLOCK_TOPIC:
+            self._sync_clock(msg.payload)
+            return
 
         if topic.endswith("/cmd"):
             try:
@@ -762,6 +767,28 @@ class Simulator:
             f"   (오프셋 {self._offset:+.0f}초)"
         )
 
+    def _sync_clock(self, raw: bytes) -> None:
+        """엔진·모니터가 들고 있는 오프셋으로 맞춘다.
+
+        재시작하면 _offset 이 0 으로 돌아가는데 CLOCK_TOPIC 은 retained
+        라 엔진과 모니터는 옛 오프셋을 유지한다. 그대로 두면 시뮬레이터만
+        실시간을 찍고, 다음 clock 명령이 엔진에게 '되돌리기' 로 보여
+        DemoClock.jump_to 가 거부한다.
+
+        자기가 쏜 것도 되받지만 같은 값이라 아래 조건에서 걸러진다.
+        """
+        try:
+            offset = float(json.loads(raw)["offset"])
+        except Exception:                          # noqa: BLE001
+            return
+        if offset <= self._offset:
+            return
+        self._offset = offset
+        print(
+            f"  시계 동기 — 오프셋 {offset:+.0f}초 "
+            f"(지금 {self._now_dt():%m-%d %H:%M:%S})"
+        )
+
     def _idle(self) -> None:
         """모든 구역을 비우고 패드를 푼다. 점프 전에 쓴다.
 
@@ -1246,11 +1273,13 @@ class Simulator:
     def _med(self, args: list[str]) -> None:
         """med [clear] — 복약 등록을 쏜다.
 
-        감기약 = 식후 1분 (식사 묶음이 닫히고 1분 뒤)
-        혈압약 = 지금부터 2분 뒤 고정 시각
+        감기약 = 식후 30분
+        혈압약 = 08:00 고정
 
-        '지금' 은 가상 시각이다 — 고정 시각 복약이 점프한 시각 기준으로
-        잡혀야 한다.
+        고정 시각은 등록보다 뒤여야 한다. 엔진이 '오늘 등록한 약이면
+        등록 시각 이전의 분량은 건너뛴다' 로 처리하므로
+        (scenarios._fixed_medication 의 reg_min), 08:00 을 보려면
+        clock 으로 08시 전에 서 있을 때 med 를 쳐야 한다.
         """
         if args and args[0] == "clear":
             payload = {
@@ -1264,7 +1293,6 @@ class Simulator:
         now = self._now_dt()
         today = now.date()
         end = today + timedelta(days=4)
-        soon = now + timedelta(minutes=2)
 
         payload = {
             "version": SRC_VERSION,
@@ -1274,19 +1302,16 @@ class Simulator:
                 {
                     "id": "med-test-cold",
                     "name": "감기약",
-                    "schedule": {"type": "after_meal", "delay_min": 1},
+                    "schedule": {"type": "after_meal", "delay_min": 30},
                     "start_date": today.isoformat(),
                     "days": 5,
                     "end_date": end.isoformat(),
-                    "refill_notice": True,          # end_date 가 4일 뒤 → 재처방도 걸린다
+                    "refill_notice": True,
                 },
                 {
                     "id": "med-test-bp",
                     "name": "혈압약",
-                    "schedule": {
-                        "type": "fixed",
-                        "times": [f"{soon.hour:02d}:{soon.minute:02d}"],
-                    },
+                    "schedule": {"type": "fixed", "times": ["08:00"]},
                     "start_date": today.isoformat(),
                     "days": 30,
                     "end_date": (today + timedelta(days=29)).isoformat(),
@@ -1295,10 +1320,7 @@ class Simulator:
             ],
         }
         self._publish_raw("hestia/registry/medications", payload, retain=True)
-        print(
-            f"  복약 등록 — 감기약(식후 1분), "
-            f"혈압약({soon.hour:02d}:{soon.minute:02d} 고정)"
-        )
+        print("  복약 등록 — 감기약(식후 30분), 혈압약(08:00 고정)")
 
     def _weather(self, args: list[str]) -> None:
         """weather [on|off|dry] — 특보를 쏜다.
