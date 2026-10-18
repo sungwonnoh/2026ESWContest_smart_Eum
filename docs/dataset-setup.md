@@ -168,8 +168,24 @@ breakfast_preparation.csv
 하루 첫 Meal_Preparation begin
 ```
 
-따라서 현재 KDE는 전체 `meal_time` 패턴을 완전히 반영하는 모델이 아니라,
-아침 Meal Preparation 패턴을 이용한 초기 검증 모델입니다.
+따라서 Aruba 기반 KDE는 실제 사용자 baseline이 아니라 개발·검증용 모델입니다.
+전체 식사 묶음은 아침·점심·저녁이 섞인 multi-modal distribution이므로,
+현재 Learning Engine은 peak와 끼니별 predictability를 함께 계산합니다.
 
-향후에는 breakfast / lunch / dinner를 포함한 전체 Meal 이벤트를 이용해
-`meal_time`을 multi-modal distribution으로 확장할 예정입니다.
+현재는 breakfast / lunch / dinner를 포함한 전체 Meal 이벤트를 이용해
+`meal_time`의 multi-modal peak와 끼니별 predictability를 계산합니다.
+
+## 실제 사용자 데이터로 전환할 때 필요한 것
+
+실제 사용자 데이터를 넣으면 개인별 패턴을 학습할 수 있고 Aruba의 proxy 라벨 문제도
+줄어듭니다. 그러나 데이터 파일을 교체하는 것만으로 실제 알림 신뢰성이 보장되지는 않습니다.
+
+- 최소 60~90일의 연속 로그를 확보하고, 가능하면 3~6개월까지 누적합니다.
+- 식사별 준비 시각(`t0`)과 실제 섭취 시각(`eat_t0`)의 의미를 일정하게 유지합니다.
+- 식사하지 않은 날, 외출일, 결측일을 기록해 정상 누락과 데이터 결측을 구분합니다.
+- 수면 시작·종료를 연결하고 센서 confidence·오탐·prompted 여부를 보존합니다.
+- 평일/주말 및 재실/외출을 보존해 조건별 패턴을 검증합니다.
+- 최근 데이터를 시간순으로 별도 보류해 실제 알림 오탐률·누락률을 평가합니다.
+
+즉 실제 데이터는 필요한 조건이지만 충분조건은 아닙니다. 기간과 이벤트 품질을 함께
+검증해야 “실제 알림을 신뢰하기에는 부족하다”는 현재의 한계를 해소할 수 있습니다.
