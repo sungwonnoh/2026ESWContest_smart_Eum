@@ -41,6 +41,25 @@ API 문서: http://localhost:8000/docs
 | `HESTIA_SRC_ID` | `rpi5-api` | API 가 발행하는 메시지의 `src_id` |
 | `HESTIA_DB_PATH` | `hestia.db` | SQLite 파일 (`*.db` 는 git 제외) |
 | `HESTIA_DEVICE_STALE_SEC` | `900` | 이 시간 동안 보고 없으면 가전 offline |
+| `HESTIA_TELEGRAM_ENABLED` | `0` | Telegram 보호자 알림 활성화 |
+| `HESTIA_TELEGRAM_BOT_TOKEN` | 빈 값 | BotFather가 발급한 봇 토큰 |
+| `HESTIA_TELEGRAM_CHAT_ID` | 빈 값 | 보호자 Telegram 대화방 ID |
+| `HESTIA_TELEGRAM_TIMEOUT_SEC` | `10` | Telegram API 요청 제한 시간 |
+
+Telegram 1차 정책은 다음과 같다.
+
+- 낙상/안전 알림의 최초 사용자 확인(`괜찮으신가요?`)은 집 안 채널로만 보낸다.
+- 사용자가 확인하지 않아 Context Engine이 `escalation_level >= 2`로 올린 안전 알림만 Telegram으로 즉시 보낸다.
+- Telegram 장애는 MQTT 수신과 앱 알림을 막지 않는다.
+- 수면·식사 주간 요약은 요약 산출기와 스케줄러를 연결한 뒤 `TelegramService.send_weekly_summary()`를 통해 보낸다. 현재 단계에서는 원천 데이터가 없는데 임의의 요약을 만들지 않는다.
+
+예시:
+
+```bash
+export HESTIA_TELEGRAM_ENABLED=1
+export HESTIA_TELEGRAM_BOT_TOKEN='<BotFather token>'
+export HESTIA_TELEGRAM_CHAT_ID='<caregiver chat id>'
+```
 
 ## API
 

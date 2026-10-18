@@ -195,3 +195,29 @@ def test_invalid_ack_type_is_dropped(hestia):
     assert not hestia.receive("hestia/notify/ack", ack("n-20260818-03", "READ"))
     assert hestia.get("/notifications").json()[0]["seen"] is False
     assert hestia.container.ingest.stats["dropped_schema"] == 1
+
+
+def test_first_safety_prompt_is_not_sent_to_caregiver(hestia):
+    calls = []
+    hestia.container.notifications._telegram = type(
+        "FakeTelegram", (), {
+            "send_fall_escalation": lambda self, **kwargs: calls.append(kwargs),
+        }
+    )()
+    receive_one(hestia, notify_id="safety-first", scenario="SAFETY",
+                priority="safety", escalation_level=1)
+    assert calls == []
+
+
+def test_escalated_safety_is_sent_to_caregiver(hestia):
+    calls = []
+    hestia.container.notifications._telegram = type(
+        "FakeTelegram", (), {
+            "send_fall_escalation": lambda self, **kwargs: calls.append(kwargs),
+        }
+    )()
+    receive_one(hestia, notify_id="safety-escalated", scenario="SAFETY",
+                priority="safety", escalation_level=2,
+                payload={"title": "괜찮으신가요?", "text": "사용자 응답이 없습니다."})
+    assert calls[0]["notify_id"] == "safety-escalated"
+    assert calls[0]["message"] == "사용자 응답이 없습니다."

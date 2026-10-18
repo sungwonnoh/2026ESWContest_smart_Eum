@@ -20,6 +20,7 @@ from .services.medication_service import MedicationService
 from .services.monitor_service import MonitorHub
 from .services.mqtt_service import MqttService, NullMqttService
 from .services.notification_service import NotificationService
+from .services.telegram_service import TelegramService
 from .services.weather_service import WeatherService
 
 
@@ -55,8 +56,15 @@ def build_container(settings: Settings, mqtt: Any = None) -> Container:
     cache = StateCache()
     monitor = MonitorHub()
     devices = DeviceService(device_repo, cache, settings.device_stale_sec)
+    telegram = TelegramService(
+        settings.telegram_enabled,
+        settings.telegram_bot_token,
+        settings.telegram_chat_id,
+        settings.telegram_timeout_sec,
+    )
     notifications = NotificationService(history, mqtt, settings.src_id,
-                                        area_of=cache.registry_area)
+                                        area_of=cache.registry_area,
+                                        telegram=telegram)
     weather = WeatherService(mqtt, settings.src_id)
     ingest = IngestService(cache, history, devices, notifications, monitor, weather)
     mqtt.set_handler(ingest.handle)
