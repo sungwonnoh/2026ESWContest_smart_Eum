@@ -135,6 +135,7 @@ class ScenarioRunner:
         self._med_fired: set[tuple[str, int, str]] = set()   # (med_id, 키, 날짜)
         self._meal_ends: list[tuple[float, float]] = []      # (eat_t0, closed_at)
         self._refill_day: str | None = None                # 재처방을 보낸 날
+        self._med_due_logged: dict[tuple[str, int], str] = {}
 
         # 조명
         self._nl: tuple[str, str, float] | None = None   # (vid, area, 켠 시각)
@@ -916,7 +917,10 @@ class ScenarioRunner:
         out: list[tuple[str, float]] = []
 
         for peak in sorted(peaks, key=lambda p: p.from_)[:limit]:
+            mark = (med.id, peak.center)
+
             if (med.id, peak.center, today) in self._med_fired:
+                self._note_med(mark, med.name, "이미 소비")
                 continue
 
             end = self._meal_end_in(peak, today)
@@ -926,15 +930,17 @@ class ScenarioRunner:
                 continue                 # 등록 전에 끝난 끼니다
 
             due = end + delay
+            at = datetime.fromtimestamp(due, KST).strftime("%H:%M")
             if self._jump_from < due <= self._jump_to:
+                self._note_med(mark, med.name, f"{at} 점프로 건너뜀")
                 self._med_fired.add((med.id, peak.center, today))
                 continue
 
             if now >= due:
                 self._send_medication(context, med, peak.center, now, today)
             else:
+                self._note_med(mark, med.name, f"{at} 예약")
                 out.append(("medication", due))
-
         return out
         
 
@@ -987,6 +993,12 @@ class ScenarioRunner:
 
     def _med_cfg(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "medication", key, default=default)
+
+    def _note_med(self, mark: tuple[str, int], name: str, msg: str) -> None:
+        """같은 상태를 반복해서 찍지 않는다 — tick 마다 돌기 때문."""
+        if self._med_due_logged.get(mark) != msg:
+            self._med_due_logged[mark] = msg
+            log.info("식후 복약 %s — %s", name, msg)
 
 
     # ------------------------------------------------------------ REFILL_PROMPT

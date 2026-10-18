@@ -277,9 +277,9 @@ class Engine:
 
         # 알림 마감·만료는 시나리오가 다시 걸어주지 않는다. 그대로 두면
         # 에스컬레이션이 단계를 건너뛰며 한 틱에 지나간다.
-        for key in skipped:
+        """for key in skipped:
             if key.startswith("notify-"):
-                self._sched.cancel(key)
+                self._sched.cancel(key)"""
 
         # ctx-* 와 전력 확정 대기는 그대로 둔다. 즉시 불려도 하는 일이
         # recompute 뿐이거나(ctx), 그 시간 유지된 것이 참이다(전력).

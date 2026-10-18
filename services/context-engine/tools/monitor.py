@@ -398,6 +398,7 @@ class InputView(View):
     TEMP_EPS = 0.5
     HUMID_EPS = 3.0
     LUX_EPS = 20.0
+    SETTLE_CM = 40.0
 
     def __init__(self, inv: Inventory) -> None:
         super().__init__(inv)
@@ -475,6 +476,12 @@ class InputView(View):
                 body = "있음" if val else "없음"
                 held = self._held(vid, val, ts)
                 extra.append(f"신뢰 {p.get('confidence', '-')}")
+                if p.get("target"):
+                    extra.append(f"타깃 {p['target']}")
+                if p.get("dist_spread_cm") is not None:
+                    sp = float(p["dist_spread_cm"])
+                    extra.append(
+                        f"변동 {sp:g}cm [{'정지' if sp < self.SETTLE_CM else '이동'}]")
                 if p.get("energy") is not None:
                     extra.append(f"에너지 {p['energy']}")
                 if p.get("distance_cm"):
@@ -907,9 +914,13 @@ class BoardView(View):
         row()
 
         state = str(self.act.get("state", "-"))
-        ar = self.act.get("area") or self.pres.get("user_area")
+        ar = self.pres.get("user_area") or self.act.get("area")
         row(f"  {area(ar)}")
-        row(self._kv(f"  {ACTIVITY_KO.get(state, state)}  ({state})",
+
+        # 활동이 아직 다른 구역에서 판정 중이면 그걸 밝힌다
+        act_ar = self.act.get("area")
+        tail = f"  @{area(act_ar)}" if act_ar and act_ar != ar else ""
+        row(self._kv(f"  {ACTIVITY_KO.get(state, state)}  ({state}){tail}",
                      "", self.act.get("confidence")))
         if self.act.get("since"):
             row(f"  {hhmm(self.act['since'])} 부터")
@@ -1017,14 +1028,16 @@ class T0View(View):
             # duration 은 묶음(t0) 길이, eat_t0 는 실제로 먹기 시작한 시각.
             # 둘을 같은 줄에 그냥 두면 모순으로 읽힌다
             if p.get("t0"):
-                span = f"묶음 {hhmm(p['t0'])}"
+                t0 = float(p["t0"])
+                span = f"묶음 {hhmm(t0)}"
                 if p.get("duration_sec"):
-                    span += f" +{dur(p['duration_sec'])}"
+                    span += (f"~{hhmm(t0 + float(p['duration_sec']))}"
+                             f" ({dur(p['duration_sec'])})")
                 bits.append(span)
             elif p.get("duration_sec"):
                 bits.append(dur(p["duration_sec"]))
             if p.get("eat_t0"):
-                bits.append(f"식사 시작 {hhmm(p['eat_t0'])}")
+                bits.append(f"먹기 시작 {hhmm(p['eat_t0'])}")
             # 수면 종료에 '유도'는 뜻이 없다. 식사·수분·복약만
             if t != "sleep_end":
                 bits.append(f"유도 {ko_bool(p.get('prompted'))}")
@@ -1291,7 +1304,7 @@ def main() -> int:
                 view.on_jump(delta)
             except Exception as exc:                  # noqa: BLE001
                 print(f"  점프 처리 실패: {exc}", file=sys.stderr)
-            repaint()
+            # repaint()
             return
         # 빈 페이로드는 retained 삭제 신호다 (simulate 의 clear). 조용히 넘긴다
         if not msg.payload or not msg.payload.strip():
