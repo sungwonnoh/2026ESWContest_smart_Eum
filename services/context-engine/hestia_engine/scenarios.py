@@ -175,10 +175,21 @@ class ScenarioRunner:
     def note_hydration(self, amount_ml: int) -> None:
         """정수기 급수. ContextEngine 이 이벤트마다 부른다."""
         now = self._clock.now()
+
+        # _roll_hydration_day 보다 먼저 판정한다 — 날이 바뀌면
+        # _last_notify_at 이 리셋될 수 있다.
+        window = float(self._notify_value(
+            "HYDRATION_PROMPT", "comply_window_min", 30)) * 60.0
+        prompted = (
+            self._last_notify_at is not None
+            and now - self._last_notify_at <= window
+        )
+
         self._roll_hydration_day(now)
         self._last_dispensed_at = now
         self._daily_ml += amount_ml
         self._notify_count = 0          # 마셨으면 반복 카운터를 푼다
+        return prompted
 
 
     def on_jump(self, skipped: tuple[str, ...], now: float,
@@ -211,7 +222,10 @@ class ScenarioRunner:
             woke_at = self._woke_at(now)
             if woke_at is not None:
                 self._awake_floor = woke_at
-                self._log_sleep("sleep_end", woke_at)
+                self._log_sleep(
+                    "sleep_end", woke_at,
+                    duration_sec=max(0.0, woke_at - self.asleep.since),
+                )
                 self._emit_decision(Decision(
                     kind="sleep", candidate=False, reason="WOKE",
                     factors={"area": self.asleep.area},
@@ -520,12 +534,13 @@ class ScenarioRunner:
         area: str | None = None, method: str | None = None,
         confidence: float | None = None,
         awake_areas: tuple[str, ...] | None = None,
+        duration_sec: float = 0.0,
     ) -> None:
         if self._t0log is None:
             return
         self._t0log.write(T0Entry(
             date=day_key(t0), type=type_, t0=t0,
-            source="sensor", prompted=False, duration_sec=0.0,
+            source="sensor", prompted=False, duration_sec=duration_sec,
             area=area, method=method, confidence=confidence,
             awake_areas=awake_areas,
         ))
@@ -1147,6 +1162,11 @@ class ScenarioRunner:
         if not lights:
             return []
         vid = lights[0]
+
+        st = self._world.device(vid)
+        if st is None or st.get("power") != "ON":
+            self._dl = None            # 시스템이 더한 몫을 잊는다
+            return []
 
         # 다른 시나리오가 쥐고 있거나 사용자가 손댔다
         cmd = self._controller.last_for(vid)

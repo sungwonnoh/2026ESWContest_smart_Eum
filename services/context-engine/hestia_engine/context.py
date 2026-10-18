@@ -928,11 +928,15 @@ class ContextEngine:
         from . import messages as m
 
         if isinstance(msg, m.DispensedEvent):
-            self.day_fsm.note_hydration()
-            # 양은 DayState 에 담지 않는다 — 시각 목록만 발행한다.
-            # 일일 권장량 누적은 시나리오가 들고 있는다.
+            # 시나리오가 먼저다 — _close_meal 과 반대 순서인데,
+            # prompted('알림을 받고 마셨나')를 판정할 재료가 시나리오에만
+            # 있기 때문이다. 수분은 시나리오가 day 를 읽지 않으므로
+            # (일일 누적을 자기가 들고 있다) 이 순서가 안전하다.
+            prompted = False
             if self._on_hydration is not None:
-                self._on_hydration(msg.amount_ml or 0)
+                prompted = bool(self._on_hydration(msg.amount_ml or 0))
+            # 양은 DayState 에 담지 않는다 — 시각 목록만 발행한다.
+            self.day_fsm.note_hydration(prompted)
 
     def _close_meal(self, session: Any, closed_at: float) -> None:
         """MealFSM 이 묶음을 닫을 때. DayFSM 기록이 먼저다 —
