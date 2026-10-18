@@ -273,7 +273,7 @@ class Engine:
 
         # 시나리오 타이머는 tick() 이 매번 통째로 다시 계산하므로 취소할
         # 필요가 없다. 다만 '그 트리거는 지나갔다' 는 것은 알려줘야 한다.
-        self.scenarios.on_jump(skipped, after)
+        self.scenarios.on_jump(skipped, after, before)
 
         # 알림 마감·만료는 시나리오가 다시 걸어주지 않는다. 그대로 두면
         # 에스컬레이션이 단계를 건너뛰며 한 틱에 지나간다.
