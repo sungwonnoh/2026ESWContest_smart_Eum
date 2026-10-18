@@ -88,7 +88,6 @@ class ScenarioRunner:
         publish: Callable[[str, dict[str, Any], bool], None],
         suppression: Any = None,
         t0log: Any = None,
-        day_fsm: Any = None,
     ) -> None:
         self._clock = clock
         self._config = config
@@ -100,7 +99,6 @@ class ScenarioRunner:
         self._suppression = suppression
 
         self._t0log = t0log
-        self._day_fsm = day_fsm
         # 직전 판정. candidate 나 reason 이 바뀔 때만 발행한다 —
         # 판정은 context 가 바뀔 때마다 일어나므로 매번 발행하면 과함.
         self._last: dict[str, tuple[bool, str]] = {}
@@ -195,8 +193,6 @@ class ScenarioRunner:
             if woke_at is not None:
                 self._awake_floor = woke_at
                 self._log_sleep("sleep_end", woke_at)
-                if self._day_fsm is not None:
-                    self._day_fsm.note_sleep_end(woke_at)
                 self._emit_decision(Decision(
                     kind="sleep", candidate=False, reason="WOKE",
                     factors={"area": self.asleep.area},
@@ -456,14 +452,11 @@ class ScenarioRunner:
         if self._awake_floor is not None and self._awake_floor > t0:
             t0 = self._awake_floor
 
-        awake_areas = self._take_awake_areas(area)
         self._log_sleep(
             "sleep_start", t0,
             area=area, method=method, confidence=confidence,
-            awake_areas=awake_areas,
+            awake_areas=self._take_awake_areas(area),
         )
-        if self._day_fsm is not None:
-            self._day_fsm.note_sleep_start(t0, awake_areas)
         self.asleep = AsleepState(
             since=t0, area=area, decision_id=decision_id, confirmed_at=now,
         )
