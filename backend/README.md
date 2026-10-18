@@ -52,6 +52,8 @@ Telegram 1차 정책은 다음과 같다.
 - 사용자가 확인하지 않아 Context Engine이 `escalation_level >= 2`로 올린 안전 알림만 Telegram으로 즉시 보낸다.
 - Telegram 장애는 MQTT 수신과 앱 알림을 막지 않는다.
 - 수면·식사 주간 요약은 요약 산출기와 스케줄러를 연결한 뒤 `TelegramService.send_weekly_summary()`를 통해 보낸다. 현재 단계에서는 원천 데이터가 없는데 임의의 요약을 만들지 않는다.
+- 보호자가 즉시 요약을 요청할 때는 `POST /api/v1/caregiver/summary`에 `{"days": 1}` 또는 원하는 기간을 보낸다.
+- 현재 `day` 기록으로 식사 횟수·분포를 집계한다. 수면 요약은 Context Engine이 `sleep_interruptions`/`bathroom_visits` 같은 일별 필드를 보내는 경우에만 집계한다.
 
 예시:
 
@@ -80,6 +82,7 @@ export HESTIA_TELEGRAM_CHAT_ID='<caregiver chat id>'
 | GET/POST | `/api/v1/medications` | 복약 일정 조회/추가 (추가는 201) |
 | PUT/DELETE | `/api/v1/medications/{id}` | 복약 일정 수정/삭제 (없으면 404, 삭제는 204) |
 | GET | `/api/v1/weather` | 외부 날씨 최신값 (아직 못 받았으면 404) |
+| POST | `/api/v1/caregiver/summary` | 지정 기간의 생활 요약을 생성하고 Telegram으로 즉시 전송 |
 | WS | `/ws/monitor` | 접속 시 `snapshot`, 이후 MQTT 이벤트 실시간 전달 |
 
 ### 가전 ↔ MQTT 장치 연결

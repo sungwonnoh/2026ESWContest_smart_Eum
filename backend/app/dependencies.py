@@ -14,6 +14,7 @@ from .repositories.history_repository import HistoryRepository
 from .repositories.medication_repository import MedicationRepository
 from .repositories.preference_repository import PreferenceRepository
 from .services.context_service import ExplanationService, StateCache
+from .services.caregiver_summary_service import CaregiverSummaryService
 from .services.device_service import DeviceService
 from .services.ingest_service import SUBSCRIPTIONS, IngestService
 from .services.medication_service import MedicationService
@@ -40,6 +41,7 @@ class Container:
     ingest: IngestService
     weather: WeatherService
     mqtt: Any  # MqttService | NullMqttService | 테스트용 가짜
+    caregiver_summary: CaregiverSummaryService
 
 
 def build_container(settings: Settings, mqtt: Any = None) -> Container:
@@ -65,6 +67,7 @@ def build_container(settings: Settings, mqtt: Any = None) -> Container:
     notifications = NotificationService(history, mqtt, settings.src_id,
                                         area_of=cache.registry_area,
                                         telegram=telegram)
+    caregiver_summary = CaregiverSummaryService(history, telegram)
     weather = WeatherService(mqtt, settings.src_id)
     ingest = IngestService(cache, history, devices, notifications, monitor, weather)
     mqtt.set_handler(ingest.handle)
@@ -87,6 +90,7 @@ def build_container(settings: Settings, mqtt: Any = None) -> Container:
         ingest=ingest,
         weather=weather,
         mqtt=mqtt,
+        caregiver_summary=caregiver_summary,
     )
 
 

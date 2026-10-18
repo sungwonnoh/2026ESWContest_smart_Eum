@@ -37,6 +37,16 @@ class ContextRecord:
     ended_at: float | None
 
 
+@dataclass
+class DailyActivityRecord:
+    date: str
+    meals: list[float]
+    hydrations: list[float]
+    medications: list[float]
+    payload: dict[str, Any]
+    updated_at: float
+
+
 def _notification(row) -> NotificationRecord:
     return NotificationRecord(
         id=row["id"],
@@ -129,6 +139,41 @@ class HistoryRepository:
         return _notification(row) if row else None
 
     # ------------------------------------------------------------ context history
+
+    def record_day(self, payload: dict[str, Any], ts: float) -> None:
+        """day context를 날짜별로 보관한다. 같은 날짜의 재전송은 최신값으로 덮는다."""
+        self._db.execute(
+            "INSERT INTO daily_activity "
+            "(date, meals_json, hydrations_json, medications_json, payload_json, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET meals_json=excluded.meals_json, "
+            "hydrations_json=excluded.hydrations_json, medications_json=excluded.medications_json, "
+            "payload_json=excluded.payload_json, updated_at=excluded.updated_at",
+            (
+                str(payload["date"]),
+                json.dumps(payload.get("meals", [])),
+                json.dumps(payload.get("hydrations", [])),
+                json.dumps(payload.get("medications", [])),
+                json.dumps(payload, ensure_ascii=False),
+                ts,
+            ),
+        )
+
+    def list_days(self, since_date: str) -> list[DailyActivityRecord]:
+        rows = self._db.query(
+            "SELECT * FROM daily_activity WHERE date >= ? ORDER BY date", (since_date,)
+        )
+        return [
+            DailyActivityRecord(
+                date=row["date"],
+                meals=json.loads(row["meals_json"]),
+                hydrations=json.loads(row["hydrations_json"]),
+                medications=json.loads(row["medications_json"]),
+                payload=json.loads(row["payload_json"]),
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
     def record_context(
         self,
