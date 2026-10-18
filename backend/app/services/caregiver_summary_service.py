@@ -72,10 +72,13 @@ class CaregiverSummaryService:
 
 
 def _has_sleep_fields(payload: dict) -> bool:
-    return any(
-        key in payload
-        for key in (
-            "sleep_interruptions", "night_awakenings", "bathroom_visits",
-            "night_bathroom_visits", "sleep_duration_min",
-        )
+    # context/day may contain zero-valued sleep fields before the first
+    # completed night. That is not the same as a collected sleep record.
+    return (
+        payload.get("sleep_start") is not None
+        or payload.get("sleep_end") is not None
+        or float(payload.get("sleep_interruptions", payload.get("night_awakenings", 0))) > 0
+        or float(payload.get("bathroom_visits", payload.get("night_bathroom_visits", 0))) > 0
+        or bool(payload.get("resleep_minutes"))
+        or "sleep_duration_min" in payload
     )
