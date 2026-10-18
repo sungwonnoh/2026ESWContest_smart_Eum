@@ -80,7 +80,9 @@ hestia-smart-home/
 
 ## Learning Engine
 
-Learning Engine은 기상·취침·식사 시각과 기상 후 수분 섭취 간격으로 Gaussian KDE 기반 개인 Baseline을 생성합니다.
+Learning Engine은 기상·취침·식사 시각으로 Gaussian KDE 기반 개인 Baseline을 생성합니다.
+수분 섭취(`hydration`)는 현재 KDE 분포가 아니라 Context Engine의 간격 규칙으로 처리합니다.
+운영에서는 RPi5의 t0 로그를 RPi4가 저장하고 하루 한 번 모델을 갱신합니다.
 
 예:
 
