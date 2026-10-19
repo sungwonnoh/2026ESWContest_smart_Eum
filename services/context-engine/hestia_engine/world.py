@@ -541,6 +541,16 @@ class WorldState:
         ]
         return min(spans) if spans else None
 
+    def last_event_at(self, device_type: str, event_type: str) -> float | None:
+        """그 종류의 가전에서 그 이벤트가 마지막으로 온 시각.
+        """
+        stamps = [
+            ts
+            for d in self.devices_of_type(device_type)
+            if (ts := d.last_event_at.get(event_type)) is not None
+        ]
+        return max(stamps) if stamps else None
+
     def offline_nodes(self) -> tuple[str, ...]:
         return tuple(nid for nid, online in self.nodes.items() if not online)
 
