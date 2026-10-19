@@ -5,6 +5,7 @@
 #include "devices/light.h"
 #include "devices/fridge.h"
 #include "devices/dispenser.h"
+#include "devices/cooktop.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -53,6 +54,9 @@ static void publishOne(const hestia::DeviceSlot& slot) {
     } else if (strcmp(slot.device_type, "smart_fridge") == 0) {
         if (!deviceNextSeq(slot, seq)) return;
         devicePublishState(slot, fridgeStateJson(slot, seq, nowTs()));
+    } else if (strcmp(slot.device_type, "cooktop") == 0) {
+        if (!deviceNextSeq(slot, seq)) return;
+        devicePublishState(slot, cooktopStateJson(slot, seq, nowTs()));
     }
     // display_node 는 main.cpp 가 다룬다.
     // water_purifier 는 상태가 없다 — 이벤트만 있는 기기다.
@@ -72,6 +76,8 @@ void devicesBegin(hestia::SeqCounter* seqs, DevicePublishFn publish) {
             fridgeBegin(*d);
         } else if (strcmp(d->device_type, "water_purifier") == 0) {
             dispenserBegin(*d);
+        } else if (strcmp(d->device_type, "cooktop") == 0) {
+            cooktopBegin(*d);
         }
     }
 }
@@ -85,6 +91,8 @@ void devicesTick() {
             fridgeTick(*d);
         } else if (strcmp(d->device_type, "water_purifier") == 0) {
             dispenserTick(*d);
+        } else if (strcmp(d->device_type, "cooktop") == 0) {
+            cooktopTick(*d);
         }
     }
 }

@@ -614,6 +614,7 @@ PRIMARY_FIELD = {
     "smart_fridge": "door",
     "washer": "cycle",
     "robot_cleaner": "status",
+    "cooktop": "status",
     "doorbell": "power",
     "display_node": "display",      # 무엇을 띄우고 있는가 가 주 상태
 }

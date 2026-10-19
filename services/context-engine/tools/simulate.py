@@ -66,6 +66,7 @@ INITIAL = {
     "washer": {"power": "OFF", "cycle": "DONE"},
     "robot_cleaner": {"status": "DOCKED", "battery": 100},
     "display_node": {"power": "ON", "display": ""},
+    "cooktop": {"status": "INITIAL"}, 
 }
 DEFAULT_INITIAL = {"power": "OFF"}
 
@@ -702,6 +703,8 @@ class Simulator:
                 print("  예약 취소")
             case "purifier":
                 self._purifier(args)
+            case "cooktop":
+                self._cooktop(args)
             case _:
                 print(f"모르는 명령: {verb} (help)")
 
@@ -954,6 +957,36 @@ class Simulator:
             return
         self._set(vid, status=status)
         print(f"  {vid} status={status}")
+
+    def _cooktop(self, args: list[str]) -> None:
+        """cooktop <cook|off|pause|lock> [화력] [남은분]
+
+        실제 ThinQ 는 화구마다 상태를 주지만, 노드가 '하나라도 COOK 인가'
+        로 접어 보낸다. 여기서도 같은 모양으로 쏜다.
+        """
+        vid = self._first_of_type("cooktop")
+        if vid is None:
+            print("cooktop 이 설정에 없음")
+            return
+        what = (args[0] if args else "cook").lower()
+        status = {"cook": "COOK", "off": "INITIAL",
+                  "pause": "PAUSE", "lock": "LOCK"}.get(what)
+        if status is None:
+            print("사용법: cooktop <cook|off|pause|lock> [화력] [남은분]")
+            return
+
+        if status == "COOK":
+            self._set(
+                vid, status=status, zone="LEFT_FRONT",
+                power_level=int(args[1]) if len(args) > 1 else 7,
+                remain_min=int(args[2]) if len(args) > 2 else None,
+            )
+            print(f"  {vid} COOK 화력 {self.devices[vid]['power_level']}")
+            return
+
+        self._set(vid, status=status, zone=None,
+                  power_level=None, remain_min=None)
+        print(f"  {vid} {status}")
 
     # ------------------------------------------------------------ 센서 명령
 
