@@ -181,6 +181,7 @@ class Simulator:
         self._last_context: dict[str, str] = {}
         self._fridge_opened_at: float | None = None
         self._lux_base: float = 100.0      # lux 명령이 준 '조명을 뺀' 바닥 조도
+        self._lux_owned: bool = True   # False 면 실물 조도 센서가 맡는다
 
         # 시연용 가상 시계. clock 명령이 바꾸고 CLOCK_TOPIC 으로 알린다.
         # 메시지에 실리는 시각과 화면에 찍는 시각만 이것을 쓴다 —
@@ -469,7 +470,7 @@ class Simulator:
         # 판정해 한 단계 더 올린다. 조도가 먼저 가면 밝기만 한 틱 묵는데,
         # 그건 '올릴지 말지' 가 아니라 '얼마나' 에만 영향을 준다.
         d = self._config.device(vid)
-        if d is not None and d.device_type == "smart_light":
+        if d is not None and d.device_type == "smart_light" and self._lux_owned:
             self._publish_lux()
 
         self._publish_state(vid)
@@ -1159,6 +1160,16 @@ class Simulator:
 
     def _lux(self, args: list[str]) -> None:
         """lux <값> — 조명을 뺀 바닥 조도. 발행값은 조명 기여를 더한 것이다."""
+        if args and args[0].lower() == "off":
+            self._lux_owned = False
+            print("  조도 발행 중지 — 실물 센서가 맡는다")
+            return
+        if args and args[0].lower() == "on":
+            self._lux_owned = True
+            print("  조도 발행 재개")
+            self._publish_lux()
+            return
+
         if self._sensor_of_type("light") is None:
             print("light 센서가 없음")
             return

@@ -10,6 +10,7 @@
 #include "sensors/ld2410.h"
 #include "sensors/bh1750.h"
 #include "sensors/button.h"
+#include "sensors/ldr.h"
 #include <cstring>
 
 static hestia::SeqCounter* seqs_    = nullptr;
@@ -64,6 +65,8 @@ void sensorsBegin(hestia::SeqCounter* seqs, SensorPublishFn publish) {
             ld2410Begin(*s);
         } else if (strcmp(s->kind, "bh1750") == 0) {
             bh1750Begin(*s);
+        } else if (strcmp(s->kind, "ldr") == 0) {
+            ldrBegin(*s);
         } else if (strcmp(s->kind, "button") == 0) {
             buttonBegin(*s);
         } else {
@@ -93,6 +96,8 @@ void sensorsTick() {
             ld2410Tick(*s);
         } else if (strcmp(s->kind, "bh1750") == 0) {
             bh1750Tick(*s);
+        } else if (strcmp(s->kind, "ldr") == 0) {
+            ldrTick(*s);
         } else if (strcmp(s->kind, "button") == 0) {
             buttonTick(*s);
         }
@@ -119,6 +124,8 @@ void sensorsResend() {
             ld2410Resend(*s);
         } else if (strcmp(s->kind, "bh1750") == 0) {
             bh1750Resend(*s);
+        } else if (strcmp(s->kind, "ldr") == 0) {
+            ldrResend(*s);
         } else if (strcmp(s->kind, "button") == 0) {
             buttonResend(*s);
         }
