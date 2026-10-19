@@ -64,6 +64,7 @@ DEVICE_KO = {
     "induction": "인덕션", "microwave": "전자레인지", "kettle": "전기포트",
     "rice_cooker": "밥솥", "refrigerator": "냉장고", "water_dispenser": "정수기",
     "fan": "선풍기", "pill_dispenser": "약통", "speaker": "스피커",
+    "cooktop": "쿡탑",
 }
 
 # policy 의 [power.*] 키 → 사람이 읽는 이름
@@ -542,11 +543,23 @@ class InputView(View):
         dt = str(p.get("device_type", "?"))
         name = DEVICE_KO.get(dt, dt)
         ts = p.get("sent_ts")
-        bits = [str(p["power"])] if p.get("power") else []
+
+        # 주 상태의 키가 기기마다 다르다 — power / status / door / cycle.
+        # 엔진의 PRIMARY_FIELD 와 같은 개념이고, 먼저 찾은 하나를 머리에 둔다.
+        bits: list[str] = []
+        for key in ("power", "status", "door", "cycle"):
+            if p.get(key):
+                bits.append(str(p[key]))
+                break
+
         for key, lab in (("brightness", "밝기"), ("color_temp", "색온"),
-                         ("volume", "음량"), ("channel", "채널")):
+                         ("volume", "음량"), ("channel", "채널"),
+                         ("power_level", "화력"), ("battery", "배터리")):
             if p.get(key) is not None:
                 bits.append(f"{lab} {p[key]}")
+        if p.get("remain_min") is not None:
+            bits.append(f"남은 {p['remain_min']}분")
+
         body = "  ".join(bits) or "-"
         return [f"[DEVICE]  {hhmmss(ts)}  {pad(name, 8)}"
                 f"{pad(self.inv.area(vid), 8)}{body}"]

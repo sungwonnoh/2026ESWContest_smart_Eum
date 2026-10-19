@@ -171,6 +171,9 @@ std::string buildDeviceEvent(const char* src_id, uint32_t seq, uint32_t sent_ts,
 std::string buildDispensed(const char* src_id, uint32_t seq, uint32_t sent_ts,
                            const char* water_type, uint16_t amount_ml);
 
+std::string buildCooktopState(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                              bool cooking, uint8_t power_level, const char* zone);
+
 // 닫을 때 실제로 열려 있던 시간을 싣는다. 고정값이면 '문을 오래 열어둔
 // 이상' 을 판정할 방법이 없다.
 std::string buildDoorClosed(const char* src_id, uint32_t seq, uint32_t sent_ts,

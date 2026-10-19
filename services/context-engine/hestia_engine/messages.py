@@ -239,6 +239,7 @@ AC_MODE = frozenset({"COOL", "HEAT", "DRY", "FAN", "SLEEP", "AUTO"})
 PURIFIER_MODE = frozenset({"AUTO", "SILENT", "TURBO"})
 WASHER_CYCLE = frozenset({"IDLE", "WASH", "RINSE", "SPIN", "DONE"})
 CLEANER_STATUS = frozenset({"DOCKED", "CLEANING", "RETURNING", "PAUSED", "ERROR"})
+COOKTOP_STATUS = frozenset({"INITIAL", "COOK", "PAUSE", "LOCK"})
 SOURCE = frozenset({"thinq", "mock", "esp32", "tasmota"})
 
 
@@ -320,6 +321,19 @@ class RobotCleanerState(DeviceStateMessage):
     battery: int | None = None
     schedule: str | None = None
 
+@dataclass(frozen=True, slots=True)
+class CooktopState(DeviceStateMessage):
+    """ThinQ 쿡탑. 화구별 상태를 노드가 하나로 접어 보낸다.
+
+    실제 API 는 화구(locationName)마다 cookingZone.currentState 를 준다.
+    엔진이 묻는 것은 '조리 중인가' 하나뿐이라, 어느 화구인지는 판정에
+    쓰지 않고 표시용으로만 싣는다.
+    """
+
+    status: str = "INITIAL"             # INITIAL / COOK / PAUSE / LOCK
+    power_level: int | None = None      # 화력 단계. 표시용
+    remain_min: int | None = None       # 타이머. 표시용
+    zone: str | None = None             # 조리 중인 화구. 표시용
 
 @dataclass(frozen=True, slots=True)
 class DoorbellState(DeviceStateMessage):
@@ -399,6 +413,14 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 status=_one_of(payload, "status", CLEANER_STATUS),
                 battery=_opt(payload, "battery", int),
                 schedule=_opt(payload, "schedule", str),
+            )
+        case "cooktop":
+            return CooktopState(
+                **common,
+                status=_one_of(payload, "status", COOKTOP_STATUS),
+                power_level=_opt(payload, "power_level", int),
+                remain_min=_opt(payload, "remain_min", int),
+                zone=_opt(payload, "zone", str),
             )
         case "doorbell":
             return DoorbellState(**common, power=_one_of(payload, "power", DEVICE_POWER))
