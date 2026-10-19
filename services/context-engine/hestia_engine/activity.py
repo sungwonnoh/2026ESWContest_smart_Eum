@@ -171,9 +171,9 @@ class ActivityEvaluator:
         # ---- 식사
         meal_areas = self._config.areas_with_role("MEAL")
         if any(presence.areas.get(a) for a in meal_areas):
-            cooking = self._world.any_power_on("MEAL")
+            cooking = self._world.any_power_on("MEAL") or self._cooktop_on()
             dwell = max((self._world.dwell_sec(a) for a in meal_areas), default=0.0)
-            off_sec = self._power_off_sec("MEAL", now)
+            off_sec = self._meal_off_sec(now)
             heat_sec = self._power_off_sec("MEAL_HEAT", now)
             fridge = self._world.since_any_event("smart_fridge", "door_opened")
 
@@ -218,23 +218,36 @@ class ActivityEvaluator:
             # 가산 점수다 — 조리 종료를 관문으로 두면 조리하지 않는
             # 끼니가 영영 잡히지 않는다.
             if not cooking:
-                eating = 0.0
-                if dwell >= dwell_need:
-                    eating += w("EATING", "meal_area_dwell")
-                if self._settled_in(meal_areas):
-                    # 설거지와 가르는 신호다. 머무는 것만으로는
-                    # 서서 치우는 것과 구별되지 않는다.
-                    eating += w("EATING", "settled")
+                # 가전 신호 — '먹을 것이 준비됐다' 의 증거
+                appliance = 0.0
                 if off_sec is not None and gap_need <= off_sec <= off_window:
-                    eating += w("EATING", "cooking_off_recent")
+                    appliance += w("EATING", "cooking_off_recent")
                 if heat_sec is not None and heat_sec <= heat_window:
                     # 데우는 것은 조리가 아니다. COOKING 을 만들지 않고
                     # 창도 짧다 — 꺼내서 바로 먹는다.
-                    eating += w("EATING", "heated_recent")
+                    appliance += w("EATING", "heated_recent")
                 if fridge_recent:
-                    eating += w("EATING", "fridge_recent")
-                if eating > 0:
-                    s["EATING"] = eating
+                    appliance += w("EATING", "fridge_recent")
+
+                # 셋을 모두 요구한다. 가중합으로는 이 구별이 되지 않는다 —
+                # 조리 직후에 데우기까지 하면 주방에 들어서기만 해도 문턱을
+                # 넘고, 반대로 식탁에 앉아 신문을 보는 것도 넘는다.
+                #
+                #   체류 + 착석  =  먹는 자세
+                #   가전 신호    =  먹을 것이 준비됨
+                #
+                # 둘 중 하나만으로는 식사가 아니다. 대신 통과한 뒤의 점수는
+                # 가전 신호가 쌓일수록 올라가 확신도에 그대로 반영된다.
+                if (
+                    dwell >= dwell_need
+                    and self._settled_in(meal_areas)
+                    and appliance > 0.0
+                ):
+                    s["EATING"] = (
+                        w("EATING", "meal_area_dwell")
+                        + w("EATING", "settled")
+                        + appliance
+                    )
 
             # 조리도 식사도 아닌 주방 체류. t0 오염을 막는 자리다 —
             # 물 마시러 30초 들른 것이 EATING 으로 잡히면 KDE 분포가 망가진다.
@@ -380,6 +393,27 @@ class ActivityEvaluator:
             ):
                 gap = now - st.changed_at
                 best = gap if best is None else min(best, gap)
+        return best
+
+    def _cooktop_on(self) -> bool:
+        """ThinQ 쿡탑이 조리 중인가.
+        """
+        return any(
+            st.get("status") == "COOK"
+            for st in self._world.devices_of_type("cooktop")
+        )
+
+    def _meal_off_sec(self, now: float) -> float | None:
+        """조리가 끝난 뒤 경과. 전력 센서와 쿡탑 중 더 최근 것.
+        """
+        best = self._power_off_sec("MEAL", now)
+        for st in self._world.devices_of_type("cooktop"):
+            if st.get("status") == "COOK":
+                continue
+            if st.changed_at <= 0.0:
+                continue                    # retained — 전환 시각을 모른다
+            gap = now - st.changed_at
+            best = gap if best is None else min(best, gap)
         return best
 
     def _settled_in(self, areas: tuple[str, ...]) -> bool:

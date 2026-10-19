@@ -1,0 +1,18 @@
+[project]
+name = "hestia-tasmota"
+version = "0.1.0"
+description = "HESTIA Tasmota 브리지 — Tasmota 플러그/전구를 hestia/sensor·device 스키마로 번역"
+requires-python = ">=3.9"
+dependencies = [
+    "paho-mqtt>=2.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["hestia_tasmota"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

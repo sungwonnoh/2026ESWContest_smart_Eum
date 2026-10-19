@@ -97,7 +97,7 @@ roles = ["MEAL"]
 source = "mock"
 node = "esp32-1"
 power_profile = "induction"
-note = "인덕션 — MEAL_PREP t0 의 주 신호"
+enabled = false     # ThinQ 쿡탑(vd-13)으로 대체. 비스마트 조리기구용 폴백 경로로 설정만 남긴다
 
 [[sensors]]
 id = "vs-07"
@@ -284,3 +284,19 @@ area = "kitchen"
 source = "esp32"
 channel = true
 note = "냉장고 보드 대행"
+
+[[devices]]
+id = "vd-12"
+device_type = "air_purifier"
+area = "living"
+source = "thinq"
+channel = false
+note = "온습도·PM 출처. 상시 가동 전제"
+
+[[devices]]
+id = "vd-13"
+device_type = "cooktop"
+area = "kitchen"
+source = "thinq"
+channel = false
+note = "ThinQ 쿡탑. 전력 추정 없이 조리 상태를 직접 받는다"
