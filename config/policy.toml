@@ -407,7 +407,7 @@ gap_after_awake_sec = 2700         # AWAKE 응답 뒤 45분
 
 # sleep_end 판정
 # moving_since는 [presence.energy]에 둔다.
-end_sustain_sec = 15               # moving_since 가 이만큼 지속돼야 sleep_end
+end_sustain_sec = 60               # moving_since 가 이만큼 지속돼야 sleep_end
 
 # 조명 프로브
 probe_dim_levels = [0.7, 0.3]      # 프로브 시작 시점 밝기 대비
