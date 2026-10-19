@@ -239,6 +239,7 @@ AC_MODE = frozenset({"COOL", "HEAT", "DRY", "FAN", "SLEEP", "AUTO"})
 PURIFIER_MODE = frozenset({"AUTO", "SILENT", "TURBO"})
 WASHER_CYCLE = frozenset({"IDLE", "WASH", "RINSE", "SPIN", "DONE"})
 CLEANER_STATUS = frozenset({"DOCKED", "CLEANING", "RETURNING", "PAUSED", "ERROR"})
+COOKTOP_STATUS = frozenset({"INITIAL", "COOK", "PAUSE", "LOCK"})
 SOURCE = frozenset({"thinq", "mock", "esp32", "tasmota"})
 
 
@@ -258,17 +259,32 @@ class SmartLightState(DeviceStateMessage):
 
 @dataclass(frozen=True, slots=True)
 class AirConditionerState(DeviceStateMessage):
+    """temp_room·humidity_pct 는 가전이 재는 실내값이다.
+
+    전원이 꺼지면 갱신이 멈춘다 — 쓰는 쪽이 값의 나이를 봐야 한다
+    (scenarios._air_reading).
+    """
+
     power: str = "OFF"
     mode: str | None = None
     temp_set: float | None = None
-    temp_room: float | None = None       # climate 센서와 충돌 시 센서값 우선
+    temp_room: float | None = None
+    humidity_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class AirPurifierState(DeviceStateMessage):
+    """상시 가동이 전제라 에어컨보다 값이 싱싱하다.
+
+    DRY_ONSET 은 에어컨을 켜지 않는 겨울에 필요하다 — 그때 실내
+    온습도를 말해줄 수 있는 것은 이쪽뿐이다.
+    """
+
     power: str = "OFF"
     mode: str | None = None
     pm25: int | None = None
+    temperature_c: float | None = None
+    humidity_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +321,19 @@ class RobotCleanerState(DeviceStateMessage):
     battery: int | None = None
     schedule: str | None = None
 
+@dataclass(frozen=True, slots=True)
+class CooktopState(DeviceStateMessage):
+    """ThinQ 쿡탑. 화구별 상태를 노드가 하나로 접어 보낸다.
+
+    실제 API 는 화구(locationName)마다 cookingZone.currentState 를 준다.
+    엔진이 묻는 것은 '조리 중인가' 하나뿐이라, 어느 화구인지는 판정에
+    쓰지 않고 표시용으로만 싣는다.
+    """
+
+    status: str = "INITIAL"             # INITIAL / COOK / PAUSE / LOCK
+    power_level: int | None = None      # 화력 단계. 표시용
+    remain_min: int | None = None       # 타이머. 표시용
+    zone: str | None = None             # 조리 중인 화구. 표시용
 
 @dataclass(frozen=True, slots=True)
 class DoorbellState(DeviceStateMessage):
@@ -355,6 +384,7 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 mode=_one_of(payload, "mode", AC_MODE, required=False),
                 temp_set=_opt(payload, "temp_set", float),
                 temp_room=_opt(payload, "temp_room", float),
+                humidity_pct=_opt(payload, "humidity_pct", float),
             )
         case "air_purifier":
             return AirPurifierState(
@@ -362,6 +392,8 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 power=_one_of(payload, "power", DEVICE_POWER),
                 mode=_one_of(payload, "mode", PURIFIER_MODE, required=False),
                 pm25=_opt(payload, "pm25", int),
+                temperature_c=_opt(payload, "temperature_c", float),
+                humidity_pct=_opt(payload, "humidity_pct", float),
             )
         case "smart_fridge":
             return SmartFridgeState(**common, door=_one_of(payload, "door", DOOR_STATE))
@@ -381,6 +413,14 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 status=_one_of(payload, "status", CLEANER_STATUS),
                 battery=_opt(payload, "battery", int),
                 schedule=_opt(payload, "schedule", str),
+            )
+        case "cooktop":
+            return CooktopState(
+                **common,
+                status=_one_of(payload, "status", COOKTOP_STATUS),
+                power_level=_opt(payload, "power_level", int),
+                remain_min=_opt(payload, "remain_min", int),
+                zone=_opt(payload, "zone", str),
             )
         case "doorbell":
             return DoorbellState(**common, power=_one_of(payload, "power", DEVICE_POWER))

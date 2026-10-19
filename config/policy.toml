@@ -277,6 +277,7 @@ title = "수분 섭취"
 text = "물 한 잔\n드세요"
 
 [notify.MEDICATION_PROMPT]
+quiet_exempt = true
 affinity = ["smart_fridge", "smart_tv"]
 requires_ack = false
 fire_and_forget = true
@@ -286,6 +287,7 @@ title = "복약 시간"
 text = "약 드실\n시간이에요"
 
 [notify.SAFETY]
+quiet_exempt = true 
 affinity = ["smart_tv", "smart_light", "voice"]
 priority = "health"
 requires_ack = true
@@ -322,6 +324,16 @@ requires_ack = false
 comply_window_min = 0
 title = "처방 안내"
 text = "약이 곧\n떨어져요"
+
+[notify.LAUNDRY_DONE]
+quiet_exempt = true
+affinity = ["smart_tv"]          # TV 가 켜져 있을 때만 대행으로 뜬다
+requires_ack = false
+fire_and_forget = true           # 꺼냈는지 판정할 센서가 없다
+cooldown_sec = 0
+comply_window_min = 0
+title = "세탁 완료"
+text = "빨래가\n다 됐어요"
 
 
 # ============================================================ 총량 제한
@@ -395,7 +407,7 @@ gap_after_awake_sec = 2700         # AWAKE 응답 뒤 45분
 
 # sleep_end 판정
 # moving_since는 [presence.energy]에 둔다.
-end_sustain_sec = 15               # moving_since 가 이만큼 지속돼야 sleep_end
+end_sustain_sec = 60               # moving_since 가 이만큼 지속돼야 sleep_end
 
 # 조명 프로브
 probe_dim_levels = [0.7, 0.3]      # 프로브 시작 시점 밝기 대비
@@ -410,6 +422,7 @@ short_gap_sec = 10800           # 덥거나 건조하면 3시간
 sleep_end_gap_sec = 7200        # 2시간 — 깬 뒤부터. 낮잠도 포함
 renotify_sec = 7200             # 알림 뒤 2시간
 max_repeat = 2                  # 안 마셔도 보내는 최대 횟수
+air_max_age_sec = 1800          # 가전 온습도 값의 유효 기간. 꺼지면 갱신이 멈춘다
 
 # 환경 — 둘 다면 HEAT 우선, 합쳐 하루 1회
 hot_temp_c = 28

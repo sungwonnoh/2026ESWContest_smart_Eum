@@ -531,4 +531,22 @@ std::string buildFridgeState(const char* src_id, uint32_t seq, uint32_t sent_ts,
     serializeJson(doc, out);
     return out;
 }
+
+std::string buildCooktopState(const char* src_id, uint32_t seq, uint32_t sent_ts,
+                              bool cooking, uint8_t power_level, const char* zone) {
+    JsonDocument doc;
+    putEnvelope(doc, src_id, seq, sent_ts);
+    doc["device_type"] = "cooktop";
+    doc["source"]      = "esp32";
+    doc["status"]      = cooking ? "COOK" : "INITIAL";
+    // 꺼진 뒤에는 화력·화구를 싣지 않는다. 엔진이 선택 필드로 읽으므로
+    // 빠진 것과 0 은 다르다 — 0 은 '화력 0 으로 조리 중' 처럼 읽힌다.
+    if (cooking) {
+        doc["power_level"] = power_level;
+        doc["zone"]        = zone;
+    }
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
 }  // namespace hestia
