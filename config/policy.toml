@@ -452,8 +452,8 @@ timeout_sec = 1800
 [scenarios.day_light]
 floor_lux = 300            # 실측 전 임시값
 ceiling_lux = 600          # 데드밴드. 조명 한 단계 기여분보다 넓게
-step = 10
-min_adjust_interval_sec = 60
+step = 20
+min_adjust_interval_sec = 5
 manual_override_sec = 7200
 day_start_hour = 8
 day_end_hour = 18
