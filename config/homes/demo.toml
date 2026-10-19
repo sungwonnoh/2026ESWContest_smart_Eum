@@ -284,3 +284,11 @@ area = "kitchen"
 source = "esp32"
 channel = true
 note = "냉장고 보드 대행"
+
+[[devices]]
+id = "vd-12"
+device_type = "air_purifier"
+area = "living"
+source = "thinq"
+channel = false
+note = "온습도·PM 출처. 상시 가동 전제"

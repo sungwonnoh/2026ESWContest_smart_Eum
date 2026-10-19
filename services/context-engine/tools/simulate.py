@@ -700,6 +700,8 @@ class Simulator:
             case "abort":
                 self._script.clear()
                 print("  예약 취소")
+            case "purifier":
+                self._purifier(args)
             case _:
                 print(f"모르는 명령: {verb} (help)")
 
@@ -907,22 +909,48 @@ class Simulator:
         print(f"  {vid} door={'OPEN' if opened else 'CLOSED'}")
 
     def _washer(self, args: list[str]) -> None:
+        """washer <cycle>  |  washer done — done 은 완료 이벤트까지 쏜다."""
         vid = self._first_of_type("washer")
         if vid is None:
             return
-        cycle = args[0].upper() if args else "WASH"
-        self._set(vid, power="ON", cycle=cycle, remain_min=30)
-        print(f"  {vid} cycle={cycle}")
+        what = (args[0] if args else "WASH").upper()
+        if what == "DONE":
+            self._set(vid, power="ON", cycle="DONE", remain_min=0)
+            self._publish_event(vid, "cycle_completed")
+            print(f"  {vid} cycle=DONE + cycle_completed")
+            return
+        self._set(vid, power="ON", cycle=what, remain_min=30)
+        print(f"  {vid} cycle={what}")
 
     def _clean(self, args: list[str]) -> None:
+        """clean <start|stop|dock>  |  clean schedule <HH:MM|off>
+
+        예약은 state 의 schedule 필드다. 엔진이 그 값과 현재 시각을
+        비교해 스스로 판단한다 — 예약 도달 이벤트는 오지 않는다.
+        """
         vid = self._first_of_type("robot_cleaner")
         if vid is None:
             print("robot_cleaner 가 설정에 없음")
             return
+
+        if args and args[0] == "schedule":
+            raw = args[1] if len(args) > 1 else "off"
+            if raw == "off":
+                self._set(vid, schedule=None)
+                print(f"  {vid} 예약 없음")
+                return
+            parts = raw.split(":")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                print("사용법: clean schedule <HH:MM|off>")
+                return
+            self._set(vid, schedule=raw)
+            print(f"  {vid} 예약 {raw}")
+            return
+
         what = args[0] if args else "start"
         status = {"start": "CLEANING", "stop": "PAUSED", "dock": "DOCKED"}.get(what)
         if status is None:
-            print("사용법: clean <start|stop|dock>")
+            print("사용법: clean <start|stop|dock> | clean schedule <HH:MM|off>")
             return
         self._set(vid, status=status)
         print(f"  {vid} status={status}")
@@ -1157,6 +1185,23 @@ class Simulator:
         hum = float(args[1]) if len(args) > 1 else 48.0
         self._publish_sensor(vid, temperature_c=temp, humidity_pct=hum)
         print(f"  {vid} {temp}°C {hum}%")
+
+    def _purifier(self, args: list[str]) -> None:
+        """purifier <온도> <습도> [pm25] — 공기청정기가 재는 실내값.
+
+        climate 센서(DHT)보다 우선한다. 둘 다 쏴서 어느 쪽이 쓰이는지
+        확인할 수 있다.
+        """
+        vid = self._first_of_type("air_purifier")
+        if vid is None:
+            print("air_purifier 가 설정에 없음")
+            return
+        temp = float(args[0]) if args else 24.0
+        hum = float(args[1]) if len(args) > 1 else 48.0
+        pm = int(args[2]) if len(args) > 2 else 15
+        self._set(vid, power="ON", mode="AUTO",
+                  temperature_c=temp, humidity_pct=hum, pm25=pm)
+        print(f"  {vid} {temp}°C {hum}% pm25={pm}")
 
     def _lux(self, args: list[str]) -> None:
         """lux <값> — 조명을 뺀 바닥 조도. 발행값은 조명 기여를 더한 것이다."""

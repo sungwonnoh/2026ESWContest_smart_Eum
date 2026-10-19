@@ -153,6 +153,13 @@ class ScenarioRunner:
         self._jump_from: float = 0.0
         self._jump_to: float = 0.0
 
+        # 청소
+        self._clean_deferred = False          # 수면과 겹쳐 미뤄둔 회차가 있나
+        self._clean_day: str | None = None    # 예약 시각을 판단한 날
+
+        # 세탁
+        self._laundry_at: float | None = None  # 마지막으로 알린 완료 시각
+
 
     def tick(self, context: Any) -> list[tuple[str, float]]:
         """시나리오를 전부 훑는다. 조건에 안 맞으면 조용히 지나간다."""
@@ -171,6 +178,8 @@ class ScenarioRunner:
         timers += self._meal_prompt(context)
         timers += self._medication_prompt(context)
         timers += self._refill_prompt(context)
+        timers += self._cleaner(context)
+        timers += self._laundry(context)
         return timers
 
     def note_hydration(self, amount_ml: int) -> None:
@@ -1066,6 +1075,114 @@ class ScenarioRunner:
         return self._config.value("scenarios", "refill", key, default=default)
 
 
+    # ------------------------------------------------------------ CLEANER
+
+    def _cleaner(self, context: Any) -> list[tuple[str, float]]:
+        """예약 청소가 수면과 겹치면 미룬다.
+
+        예약 자체는 건드리지 않는다 — 사용자가 앱에서 맞춰둔 값이고,
+        시스템이 바꿔두면 앱을 열었을 때 시각이 달라져 있다. 그 시각에
+        자고 있으면 돌려보내고, 깨면 그때 시작한다.
+
+        이미 돌고 있는 중에 잠드는 것은 멈추지 않는다. 시작된 청소를
+        끊는 쪽이 더 성가시고, 그 소리에 잠들었다는 것은 방해가 되지
+        않았다는 뜻이다.
+        """
+        vid = self._cleaner_vid()
+        if vid is None:
+            return []
+        st = self._world.device(vid)
+        if st is None:
+            return []
+
+        now = self._clock.now()
+
+        # 미뤄둔 것이 있으면 깨는 즉시 돌린다
+        if self._clean_deferred and self.asleep is None:
+            self._clean_deferred = False
+            self._controller.send(
+                target=vid, action="start", reason="CLEANER", priority="low",
+            )
+            log.info("보류했던 청소 시작 %s", vid)
+            return []
+
+        due = self._clean_due(st, now)
+        if due is None:
+            return []                        # 예약이 없다
+
+        today = day_key(now)
+        if self._clean_day == today:
+            return []                        # 오늘 몫은 이미 판단했다
+        if now < due:
+            return [("cleaner", due)]
+
+        self._clean_day = today
+        if self.asleep is None:
+            return []                        # 깨어 있다. 청소기가 알아서 시작한다
+
+        self._clean_deferred = True
+        if str(st.get("status") or "") == "CLEANING":
+            # 예약 도달과 판단 사이에 이미 출발했다
+            self._controller.send(
+                target=vid, action="dock", reason="CLEANER", priority="low",
+            )
+        log.info("수면 중 — 청소 보류 (예약 %s)", st.get("schedule"))
+        return []
+
+    def _cleaner_vid(self) -> str | None:
+        found = self._controller.devices_of_type("robot_cleaner")
+        return found[0] if found else None
+
+    def _clean_due(self, st: Any, now: float) -> float | None:
+        """오늘의 예약 시각. schedule 이 없거나 모양이 틀리면 None."""
+        raw = st.get("schedule")
+        if not raw:
+            return None
+        try:
+            minutes = hhmm(str(raw))
+        except ValueError:
+            log.warning("청소 예약 시각을 못 읽음: %r", raw)
+            return None
+        dt = datetime.fromtimestamp(now, KST).replace(
+            hour=minutes // 60, minute=minutes % 60, second=0, microsecond=0
+        )
+        return dt.timestamp()
+
+
+    # ------------------------------------------------------------ LAUNDRY_DONE
+
+    def _laundry(self, context: Any) -> list[tuple[str, float]]:
+        """세탁이 끝났다고 알린다.
+
+        자고 있어도 보낸다 — 젖은 빨래를 밤새 통 안에 두면 냄새가 밴다.
+        다만 정숙 시간에는 채널 선택이 음성을 거르므로, 화면이 꺼져
+        있으면 결과적으로 나가지 않는다. 깨우지 않으면서 놓치지도 않는
+        선이 거기다.
+
+        완료 시각을 기억해 같은 회차를 두 번 알리지 않는다. 이벤트는
+        retained 가 아니지만 world 가 마지막 시각을 들고 있다.
+        """
+        at = self._world.last_event_at("washer", "cycle_completed")
+        if at is None or at == self._laundry_at:
+            return []
+
+        self._laundry_at = at
+        self._notifier.send(
+            scenario="LAUNDRY_DONE",
+            title=str(self._notify_value("LAUNDRY_DONE", "title", "세탁 완료")),
+            text=str(self._notify_value(
+                "LAUNDRY_DONE", "text", "빨래가\n다 됐어요"
+            )),
+            speech=str(self._notify_value(
+                "LAUNDRY_DONE", "speech",
+                "세탁이 다 됐어요. 빨래를 꺼내 널어 두시면 좋겠어요.",
+            )),
+            priority=str(self._notify_value("LAUNDRY_DONE", "priority", "normal")),
+            presence=getattr(context, "presence", None),
+            suppression=getattr(context, "suppression", None),
+        )
+        return []
+
     # ------------------------------------------------------------ NIGHT_LIGHT
 
     def _night_light_on(self, area: str | None, now: float) -> None:
@@ -1464,29 +1581,54 @@ class ScenarioRunner:
 
         self._last_away_state = away.state
 
+    # 온습도 출처 우선순위. 앞의 것이 꺼졌거나 값이 묵으면 다음으로 간다.
+    AIR_SOURCES = ("air_purifier", "air_conditioner")
+
+    def _air_reading(self) -> tuple[float, float] | None:
+        """실내 온도·습도. (℃, %) 또는 모르면 None.
+
+        공기청정기 → 에어컨 → 온습도 센서 순이다. 가전은 전원이 꺼지면
+        갱신이 멈추므로 값의 나이를 함께 본다 — 꺼진 에어컨의 묵은
+        값으로 판정하면 한겨울 DRY_ONSET 이 한 번도 울리지 않는다.
+        """
+        now = self._clock.now()
+        max_age = float(self._hyd("air_max_age_sec", 1800))
+
+        for kind in self.AIR_SOURCES:
+            for st in self._world.devices_of_type(kind):
+                if st.idle_sec(now) > max_age:
+                    continue
+                temp = st.get("temperature_c")
+                if temp is None:
+                    temp = st.get("temp_room")      # 에어컨은 이름이 다르다
+                hum = st.get("humidity_pct")
+                if temp is None or hum is None:
+                    continue
+                return float(temp), float(hum)
+
+        st = self._climate()                        # 온습도 센서 폴백
+        if st is not None:
+            return st.temperature_c, st.humidity_pct
+        return None
+
     def _track_air(self, now: float) -> None:
         """덥거나 건조한가. 27.9 ↔ 28.1 로 울리지 않게 히스테리시스를 둔다.
 
-        실내 센서만 본다. 폭염 특보(external/weather)는 토픽이 아직 없어
-        붙이지 않았고, 들어오면 OR 로 합친다.
+        실내값만 본다. 폭염 특보(external/weather)는 _heat_advisory 가
+        따로 보고 OR 로 합쳐진다.
         """
-        st = self._climate()
-        if st is None:
+        reading = self._air_reading()
+        if reading is None:
             return
+        temp_c, humidity = reading
 
         hot_in = float(self._hyd("hot_temp_c", 28))
         hot_out = float(self._hyd("hot_exit_c", 26))
         dry_in = float(self._hyd("dry_humidity_pct", 35))
         dry_out = float(self._hyd("dry_exit_pct", 40))
 
-        self._hot = (
-            st.temperature_c >= hot_in if not self._hot
-            else st.temperature_c > hot_out
-        )
-        self._dry = (
-            st.humidity_pct <= dry_in if not self._dry
-            else st.humidity_pct < dry_out
-        )
+        self._hot = temp_c >= hot_in if not self._hot else temp_c > hot_out
+        self._dry = humidity <= dry_in if not self._dry else humidity < dry_out
 
     def _roll_hydration_day(self, now: float) -> None:
         today = day_key(now)

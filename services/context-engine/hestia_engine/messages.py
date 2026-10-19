@@ -258,17 +258,32 @@ class SmartLightState(DeviceStateMessage):
 
 @dataclass(frozen=True, slots=True)
 class AirConditionerState(DeviceStateMessage):
+    """temp_room·humidity_pct 는 가전이 재는 실내값이다.
+
+    전원이 꺼지면 갱신이 멈춘다 — 쓰는 쪽이 값의 나이를 봐야 한다
+    (scenarios._air_reading).
+    """
+
     power: str = "OFF"
     mode: str | None = None
     temp_set: float | None = None
-    temp_room: float | None = None       # climate 센서와 충돌 시 센서값 우선
+    temp_room: float | None = None
+    humidity_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class AirPurifierState(DeviceStateMessage):
+    """상시 가동이 전제라 에어컨보다 값이 싱싱하다.
+
+    DRY_ONSET 은 에어컨을 켜지 않는 겨울에 필요하다 — 그때 실내
+    온습도를 말해줄 수 있는 것은 이쪽뿐이다.
+    """
+
     power: str = "OFF"
     mode: str | None = None
     pm25: int | None = None
+    temperature_c: float | None = None
+    humidity_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,6 +370,7 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 mode=_one_of(payload, "mode", AC_MODE, required=False),
                 temp_set=_opt(payload, "temp_set", float),
                 temp_room=_opt(payload, "temp_room", float),
+                humidity_pct=_opt(payload, "humidity_pct", float),
             )
         case "air_purifier":
             return AirPurifierState(
@@ -362,6 +378,8 @@ def parse_device_state(payload: dict, base: dict) -> DeviceStateMessage:
                 power=_one_of(payload, "power", DEVICE_POWER),
                 mode=_one_of(payload, "mode", PURIFIER_MODE, required=False),
                 pm25=_opt(payload, "pm25", int),
+                temperature_c=_opt(payload, "temperature_c", float),
+                humidity_pct=_opt(payload, "humidity_pct", float),
             )
         case "smart_fridge":
             return SmartFridgeState(**common, door=_one_of(payload, "door", DOOR_STATE))
