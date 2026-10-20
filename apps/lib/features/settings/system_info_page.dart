@@ -17,11 +17,42 @@ class SystemInfoPage extends StatefulWidget {
 
 class _SystemInfoPageState extends State<SystemInfoPage> {
   bool? _connected;
+  bool? _heatDemo;          // null = 아직 모름 (날씨를 못 받음)
+  bool _heatSending = false;
 
   @override
   void initState() {
     super.initState();
     _checkConnection(showProgress: false);
+    _loadHeatDemo();
+  }
+
+  Future<void> _loadHeatDemo() async {
+    try {
+      final w = await HestiaScope.of(context).repository.getWeather();
+      if (mounted) setState(() => _heatDemo = w?.demo);
+    } on HestiaException {
+      if (mounted) setState(() => _heatDemo = null);
+    }
+  }
+
+  Future<void> _setHeatDemo(bool on) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _heatSending = true);
+    try {
+      await HestiaScope.of(context).repository.setWeatherDemo(on);
+      if (!mounted) return;
+      setState(() => _heatDemo = on);
+      messenger.showSnackBar(SnackBar(
+        content: Text(on ? '폭염 특보 시연을 켰습니다. 1시간 뒤 자동으로 꺼집니다.' : '실제 날씨로 돌아갑니다.'),
+      ));
+    } on HestiaException {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('보내지 못했습니다. 연결 상태를 확인하세요.')),
+      );
+    } finally {
+      if (mounted) setState(() => _heatSending = false);
+    }
   }
 
   Future<void> _checkConnection({bool showProgress = true}) async {
@@ -127,6 +158,17 @@ class _SystemInfoPageState extends State<SystemInfoPage> {
                     onTap: _checkConnection,
                   ),
                 ],
+              ),
+            ),
+            const SectionHeader('시연 모드'),
+            HestiaCard(
+              padding: EdgeInsets.zero,
+              child: SwitchListTile(
+                title: const Text('폭염 특보 시연'),
+                subtitle: const Text('바깥 날씨에 폭염주의보와 33°C를 덧씌웁니다. '
+                    '홈 화면에 \'시연\' 표시가 붙고 1시간 뒤 자동으로 꺼집니다.'),
+                value: _heatDemo ?? false,
+                onChanged: _heatSending ? null : _setHeatDemo,
               ),
             ),
             if (demo != null) ...[

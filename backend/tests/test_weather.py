@@ -7,7 +7,7 @@ import time
 from conftest import envelope
 
 from app.services.ingest_service import SUBSCRIPTIONS
-from app.services.weather_service import WEATHER_GET_TOPIC, WEATHER_TOPIC
+from app.services.weather_service import WEATHER_DEMO_TOPIC, WEATHER_GET_TOPIC, WEATHER_TOPIC
 
 
 def weather(observed_at: float, **fields):
@@ -83,3 +83,18 @@ def test_requests_weather_on_every_connect(hestia):
     topic, payload, qos, retain = gets[0]
     assert (qos, retain) == (1, False)
     assert payload["src_id"] == "rpi5-api"
+
+
+def test_demo_toggle_publishes_to_rpi4(hestia):
+    r = hestia.put("/weather/demo", json={"heat": True})
+    assert r.status_code == 202
+    topic, payload, qos, retain = hestia.mqtt.published[-1]
+    assert (topic, qos, retain) == (WEATHER_DEMO_TOPIC, 1, False)
+    assert payload["heat"] is True
+
+
+def test_demo_weather_is_marked(hestia):
+    hestia.receive(WEATHER_TOPIC, weather(time.time()))
+    assert hestia.get("/weather").json()["demo"] is False
+    hestia.receive(WEATHER_TOPIC, weather(time.time(), demo=True))
+    assert hestia.get("/weather").json()["demo"] is True
