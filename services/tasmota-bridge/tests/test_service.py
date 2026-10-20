@@ -37,6 +37,21 @@ def test_unsupported_type_refuses_to_start():
         sensors_from(raw)
 
 
+def test_tasmota_topic_is_read():
+    """Topic 을 바꿀 수 없는 펌웨어는 공장 토픽을 설정에 적는다."""
+    raw = [{"id": "vs-07", "type": "power", "source": "tasmota",
+            "tasmota_topic": "Smartplug_D7034D"}]
+    assert sensors_from(raw) == (BridgeSensor("vs-07", "power", "Smartplug_D7034D"),)
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a/b", "a+b", "a#b", 7])
+def test_bad_tasmota_topic_refused(bad):
+    raw = [{"id": "vs-07", "type": "power", "source": "tasmota",
+            "tasmota_topic": bad}]
+    with pytest.raises(ConfigError):
+        sensors_from(raw)
+
+
 # ------------------------------------------------------------ 토픽
 
 def test_round_trip(svc):
@@ -130,3 +145,29 @@ def test_device_payload_has_type_and_source(lights):
     assert p["device_type"] == "smart_light"
     assert p["source"] == "tasmota"
     assert p["src_id"] == "vd-02"
+
+
+def test_explicit_topic_is_used():
+    """Topic 변경이 막힌 펌웨어는 공장 토픽을 그대로 쓴다."""
+    svc = BridgeService((BridgeSensor("vs-07", "power", "Smartplug_D7034D"),))
+
+    assert svc.tasmota_topic("vs-07") == "Smartplug_D7034D"
+    assert "tele/Smartplug_D7034D/SENSOR" in svc.subscriptions()
+    assert svc.vid_for("tele/Smartplug_D7034D/SENSOR") == ("vs-07", "/SENSOR")
+    assert svc.vid_for("tele/Smartplug_D7034D/LWT") == ("vs-07", "/LWT")
+    # 규칙 토픽은 이제 이 기기의 것이 아니다
+    assert svc.vid_for("tele/hestia-vs-07/SENSOR") is None
+
+
+def test_topic_falls_back_to_rule():
+    """적어두지 않으면 <접두어><vid> 규칙 그대로다."""
+    svc = BridgeService((BridgeSensor("vs-07", "power"),))
+    assert svc.tasmota_topic("vs-07") == "hestia-vs-07"
+
+
+def test_duplicate_topics_refused():
+    with pytest.raises(ValueError, match="같은 Tasmota 토픽"):
+        BridgeService((
+            BridgeSensor("vs-06", "power", "shared"),
+            BridgeSensor("vs-07", "power", "shared"),
+        ))
