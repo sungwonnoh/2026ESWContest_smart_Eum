@@ -150,6 +150,11 @@ class ApiHestiaRepository implements HestiaRepository {
   Future<Weather?> getWeather() => _orNull(() async =>
       Weather.fromJson(_map(await _client.get('$_api/weather'))));
 
+  @override
+  Future<void> setWeatherDemo(bool heat) async {
+    await _client.put('$_api/weather/demo', {'heat': heat});
+  }
+
   // ---------------------------------------------------------------- polling
 
   late final StreamController<HestiaNotification> _incoming =

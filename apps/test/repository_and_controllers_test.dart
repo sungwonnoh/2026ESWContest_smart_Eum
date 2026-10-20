@@ -15,6 +15,18 @@ void main() {
       expect(await newRepo().getSetup(), isNull);
     });
 
+    test('폭염 시연을 켜면 특보·기온이 바뀌고 시연 표시가 붙는다', () async {
+      final repo = newRepo();
+      expect((await repo.getWeather())!.demo, isFalse);
+      await repo.setWeatherDemo(true);
+      final w = (await repo.getWeather())!;
+      expect(w.demo, isTrue);
+      expect(w.temperatureC, 33);
+      expect(w.warnings!.single.type, 'HEAT');
+      await repo.setWeatherDemo(false);
+      expect((await repo.getWeather())!.warnings, isEmpty);
+    });
+
     test('SEEN ACK를 받으면 해당 알림만 확인 처리한다', () async {
       final repo = newRepo();
       await repo.acknowledgeNotification('n-demo-001');

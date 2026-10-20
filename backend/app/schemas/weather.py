@@ -43,6 +43,8 @@ class WeatherPayload(MqttEnvelope):
     # null = 모름, [] = 집 구역에 특보 없음
     warnings: Optional[List[WeatherWarningPayload]] = None
     warnings_issued_at: Optional[Number] = None
+    # 시연 모드로 폭염 특보·기온·습도를 덧씌운 값
+    demo: bool = False
 
 
 # ------------------------------------------------------------------ API
@@ -66,3 +68,9 @@ class Weather(ApiModel):
     warnings: Optional[List[WeatherWarning]] = None
     # 관측이 WEATHER_STALE_SEC 보다 오래됨 — RPi4 갱신이 끊겼을 수 있다
     stale: bool = False
+    # 시연 모드 값 (폭염 특보·기온·습도가 실제가 아님). 앱은 '시연' 표시를 붙인다
+    demo: bool = False
+
+
+class WeatherDemoIn(ApiModel):
+    heat: bool

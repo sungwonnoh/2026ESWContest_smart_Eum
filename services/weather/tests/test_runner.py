@@ -9,7 +9,7 @@ import pytest
 from conftest import FakeKma, kst, ncst_response, warning_response
 from hestia_weather.config import ConfigError, load_location, location_from
 from hestia_weather.kma import KmaClient, KmaError
-from hestia_weather.runner import GET_TOPIC, WEATHER_TOPIC, Runner
+from hestia_weather.runner import DEMO_TOPIC, GET_TOPIC, WEATHER_TOPIC, Runner
 from hestia_weather.service import Location, WeatherService
 
 REPO = Path(__file__).resolve().parents[3]
@@ -123,12 +123,73 @@ def test_reconnect_subscribes_and_resends_cache():
     runner, client, clock = make(fake, kst(2026, 10, 10, 14, 20))
 
     runner._on_connect(client, None, None, 0, None)
-    assert client.subscribed == [GET_TOPIC]
+    assert client.subscribed == [GET_TOPIC, DEMO_TOPIC]
     assert client.published == []           # 아직 캐시 없음
 
     runner.tick()
     runner._on_connect(client, None, None, 0, None)
     assert [p[1]["reason"] for p in client.published] == ["update", "update"]
+
+
+# ==================================================================== 시연
+
+
+def _demo(on: bool, **extra) -> Msg:
+    return Msg(DEMO_TOPIC, json.dumps({"version": 1, "sent_ts": 0, "src_id": "rpi5-api", "heat": on, **extra}).encode())
+
+
+def test_demo_overlays_heat_and_summer_values_on_real_observation():
+    dry = warning_response({"tmFc": "202610101400", "tmSeq": "1", "t6": "o 건조주의보 : 서울"})
+    fake = FakeKma({"1400": ncst_response("20261010", "1400", T1H="15.2", WSD="3.1")}, warning=dry)
+    runner, client, clock = make(fake, kst(2026, 10, 10, 14, 20), warning_areas=("서울",))
+    runner.tick()
+    real = client.published[-1][1]
+
+    runner._on_message(client, None, _demo(True))
+    runner.tick()
+    topic, demo, _, retain = client.published[-1]
+    assert (topic, retain) == (WEATHER_TOPIC, False)
+    assert demo["demo"] is True
+    assert (demo["temperature_c"], demo["humidity_pct"]) == (33.0, 60.0)
+    assert [w["type"] for w in demo["warnings"]] == ["DRY", "HEAT"]   # 실제 특보는 남는다
+    assert demo["observed_at"] == real["observed_at"]
+    assert demo["wind_speed_ms"] == real["wind_speed_ms"] == 3.1
+
+    runner._on_message(client, None, _demo(False))
+    runner.tick()
+    off = client.published[-1][1]
+    assert "demo" not in off
+    assert off["temperature_c"] == 15.2
+    assert [w["type"] for w in off["warnings"]] == ["DRY"]
+
+
+def test_demo_survives_new_observation_and_expires():
+    fake = FakeKma({"1400": ncst_response("20261010", "1400"), "1500": ncst_response("20261010", "1500")})
+    runner, client, clock = make(fake, kst(2026, 10, 10, 14, 20))
+    runner.tick()
+    runner._on_message(client, None, _demo(True, ttl_sec=3600))
+    runner.tick()
+
+    clock.t = kst(2026, 10, 10, 15, 15)          # 새 정시 실황 — 시연은 유지
+    runner.tick()
+    assert client.published[-1][1]["demo"] is True
+
+    clock.t = kst(2026, 10, 10, 15, 21)          # 1시간 지남 — 실제 값을 한 번 다시 보낸다
+    n = len(client.published)
+    runner.tick()
+    assert len(client.published) == n + 1
+    assert "demo" not in client.published[-1][1]
+
+
+def test_retained_demo_command_is_ignored():
+    fake = FakeKma({"1400": ncst_response("20261010", "1400")})
+    runner, client, clock = make(fake, kst(2026, 10, 10, 14, 20))
+    runner.tick()
+    msg = _demo(True)
+    msg.retain = True
+    runner._on_message(client, None, msg)
+    runner.tick()
+    assert "demo" not in client.published[-1][1]
 
 
 # ==================================================================== config
