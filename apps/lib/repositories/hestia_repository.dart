@@ -57,4 +57,7 @@ abstract interface class HestiaRepository {
 
   /// RPi4가 보낸 바깥 날씨. 아직 받지 못했으면 null.
   Future<Weather?> getWeather();
+
+  /// 시연 모드: 폭염 특보와 여름 기온·습도를 덧씌운다. 1시간 뒤 자동으로 꺼진다.
+  Future<void> setWeatherDemo(bool heat);
 }

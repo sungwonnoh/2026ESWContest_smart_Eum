@@ -9,12 +9,27 @@ Context Engine(RPi5)이 실내 센서와 함께 보조 신호로 씁니다.
 |---|---|---|---|
 | `hestia/external/weather` | RPi4 → CE | 1 | 아님 |
 | `hestia/external/weather/get` | CE → RPi4 | 1 | 아님 (retained 요청은 무시) |
+| `hestia/external/weather/demo` | Backend → RPi4 | 1 | 아님 (retained 명령은 무시) |
 
 - **update**: 새 정시 실황을 받거나 집 구역 특보가 바뀌면 바로 발행합니다. 같은 값은 다시 보내지 않습니다. 브로커에 다시 연결되면 마지막 값을 한 번 더 보냅니다.
 - **reply**: `get`을 받으면 캐시한 값으로 바로 응답합니다 (API를 다시 부르지 않음). 캐시가 없거나 90분보다 오래됐으면 한 번 조회한 뒤 응답합니다. 날씨를 한 번도 받지 못했으면 응답하지 않습니다.
 - `get` payload는 비어 있어도 됩니다 (`{}`).
 
 retained를 쓰지 않으므로 CE는 **재시작 직후 `get`을 한 번 보내야** 바로 날씨를 받습니다.
+
+### 시연 모드 (`demo`)
+
+앱 설정 > 시스템 정보 > 폭염 특보 시연 → `PUT /api/v1/weather/demo {"heat": true}` → `hestia/external/weather/demo {"heat": true, "ttl_sec"?}`.
+
+- 켜져 있는 동안 발행 직전에 `warnings`에 `폭염주의보(HEAT, ADVISORY)`를 더하고 `temperature_c=33.0`, `humidity_pct=60.0`으로 바꾸며 `"demo": true`를 붙입니다.
+- 기상청 조회는 계속합니다. 관측 시각·강수·풍속·다른 특보는 실제 값이고, 정시 갱신이 와도 시연 값이 유지됩니다.
+- `ttl_sec`(기본 3600) 뒤 저절로 꺼지며 실제 값을 한 번 다시 발행합니다. 서비스를 재시작해도 꺼집니다.
+- 꺼져 있을 때는 `demo` 필드를 보내지 않습니다.
+
+```bash
+mosquitto_pub -t 'hestia/external/weather/demo' -m '{"heat": true}' -q 1
+mosquitto_pub -t 'hestia/external/weather/demo' -m '{"heat": false}' -q 1
+```
 
 ## payload
 

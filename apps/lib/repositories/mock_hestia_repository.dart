@@ -319,13 +319,26 @@ class MockHestiaRepository implements HestiaRepository, DemoControls {
     return Weather(
       locationName: '서울',
       observedAt: DateTime(now.year, now.month, now.day, now.hour),
-      temperatureC: 24.1,
-      humidityPct: 61,
+      temperatureC: _weatherDemo ? 33 : 24.1,
+      humidityPct: _weatherDemo ? 60 : 61,
       precipitationMm: 0,
       precipType: PrecipType.none,
       windSpeedMs: 1.8,
-      warnings: const [],
+      warnings: _weatherDemo
+          ? const [
+              WeatherWarning(name: '폭염주의보', type: 'HEAT', level: 'ADVISORY')
+            ]
+          : const [],
+      demo: _weatherDemo,
     );
+  }
+
+  bool _weatherDemo = false;
+
+  @override
+  Future<void> setWeatherDemo(bool heat) async {
+    await _respond();
+    _weatherDemo = heat;
   }
 
   void dispose() => _notificationController.close();

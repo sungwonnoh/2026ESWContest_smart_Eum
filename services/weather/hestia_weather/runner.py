@@ -2,6 +2,7 @@
 
     hestia/external/weather       발행. 새 실황·특보 변경(update), 요청 응답(reply). QoS 1, retained 아님
     hestia/external/weather/get   구독. Context Engine 이 재시작 직후나 필요할 때 보낸다
+    hestia/external/weather/demo  구독. 시연 모드 {"heat": true|false, "ttl_sec"?}. Backend 가 앱 요청으로 보낸다
 
 실행:
     KMA_SERVICE_KEY=... MQTT_HOST=<rpi5> python -m hestia_weather.runner
@@ -23,12 +24,13 @@ import paho.mqtt.client as mqtt
 
 from .config import ConfigError, load_location
 from .kma import KmaClient
-from .service import WeatherService
+from .service import DEMO_TTL_SEC, WeatherService
 
 log = logging.getLogger(__name__)
 
 WEATHER_TOPIC = "hestia/external/weather"
 GET_TOPIC = "hestia/external/weather/get"
+DEMO_TOPIC = "hestia/external/weather/demo"
 
 LOOP_TIMEOUT_SEC = 0.5
 
@@ -49,6 +51,7 @@ class Runner:
         self._clock = clock
         self._running = False
         self._requested = False
+        self._demo: dict | None = None          # 받은 시연 명령. 루프에서 적용한다
         self.client = client or self._make_client()
 
     # ------------------------------------------------------------ 생애
@@ -88,6 +91,14 @@ class Runner:
         """조회할 때가 됐으면 조회하고(새 내용이면 발행), 요청이 있었으면 응답한다."""
         now = self._clock()
 
+        if self._demo is not None:
+            cmd, self._demo = self._demo, None
+            if self.service.set_demo(bool(cmd.get("heat")), now, float(cmd.get("ttl_sec") or DEMO_TTL_SEC)):
+                self._publish(reason="update")
+
+        if self.service.demo_expired(now):
+            self._publish(reason="update")
+
         if self.service.due(now) and self.service.poll(now):
             self._publish(reason="update")
 
@@ -117,7 +128,8 @@ class Runner:
             log.warning("연결 거부 rc=%s", reason_code)
             return
         client.subscribe(GET_TOPIC, qos=1)
-        log.info("연결됨 — 구독 %s", GET_TOPIC)
+        client.subscribe(DEMO_TOPIC, qos=1)
+        log.info("연결됨 — 구독 %s, %s", GET_TOPIC, DEMO_TOPIC)
 
         if self.service.cache is not None:
             self._publish(reason="update")
@@ -133,6 +145,14 @@ class Runner:
             return
         if msg.topic == GET_TOPIC:
             self._requested = True              # 응답은 루프(tick)에서 — 콜백에서 HTTP 를 부르지 않는다
+        elif msg.topic == DEMO_TOPIC:
+            try:
+                cmd = json.loads(msg.payload)
+            except ValueError:
+                log.warning("시연 명령 형식 오류: %r", msg.payload)
+                return
+            if isinstance(cmd, dict):
+                self._demo = cmd
 
     def _publish(self, *, reason: str) -> None:
         payload = self.service.payload(reason=reason, now=self._clock())
