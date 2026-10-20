@@ -54,6 +54,16 @@ void main() {
       expect(c.canProceed, isFalse);
     });
 
+    test('둘 수 있는 공간이 없으면 위치를 비워 두고 다음으로 갈 수 없다', () {
+      final c = OnboardingController(newRepo())
+        ..next()
+        ..toggleDevice(DeviceType.washer) // 다용도실 전용, 기본 공간에 없음
+        ..next()
+        ..next();
+      expect(c.placements.containsKey(DeviceType.washer), isFalse);
+      expect(c.canProceed, isFalse);
+    });
+
     test('공간이 하나도 없으면 다음으로 갈 수 없다', () {
       final c = OnboardingController(newRepo())..next();
       for (final id in [...c.selectedRoomIds]) {
@@ -77,6 +87,11 @@ void main() {
       final tv = setup.devices.firstWhere((d) => d.type == DeviceType.tv);
       expect(tv.roomId, 'living');
       expect(tv.name, '거실 TV');
+      final lights = setup.devices.where((d) => d.type == DeviceType.light);
+      expect(
+        lights.map((d) => d.roomId),
+        unorderedEquals(['living', 'kitchen', 'bedroom']),
+      );
     });
   });
 

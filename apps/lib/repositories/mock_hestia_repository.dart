@@ -339,9 +339,7 @@ class MockHestiaRepository implements HestiaRepository, DemoControls {
 
   String? _nearestRoomId() {
     final rooms = _setup?.rooms ?? const <Room>[];
-    for (final id in const ['living', 'studio']) {
-      if (rooms.any((r) => r.id == id)) return id;
-    }
+    if (rooms.any((r) => r.id == 'living')) return 'living';
     return rooms.isEmpty ? null : rooms.first.id;
   }
 
