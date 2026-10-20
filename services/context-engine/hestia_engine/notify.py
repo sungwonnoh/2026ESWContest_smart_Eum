@@ -381,6 +381,7 @@ class Notifier:
         self.channels = ChannelSelector(clock, config, world)
         self.limits = NotifyLimits(clock, config)
         self._seq = 0
+        self._outcome_sent: set[str] = set()
 
     # ------------------------------------------------------------ 발송
 
@@ -659,6 +660,11 @@ class Notifier:
     def _emit_outcome(self, n: PendingNotify | None) -> None:
         if n is None:
             return
+
+        if n.notify_id in self._outcome_sent:
+            return
+        self._outcome_sent.add(n.notify_id)
+        
         complied, evidence, delay = self._comply(n)
         self._publish("hestia/intervention/outcome", {
             "version": SCHEMA_VERSION,
