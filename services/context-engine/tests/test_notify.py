@@ -251,8 +251,14 @@ def test_voice_blocked_in_quiet_hours(night):
 
 
 def test_safety_voice_pierces_quiet_hours(night):
-    """안전은 정숙 시간대를 뚫는다."""
-    assert night.notifier.channels.select("SAFETY", None, level=2) == (VOICE,)
+    """안전은 정숙 시간대를 뚫는다.
+
+    2단계가 보호자 통보로 바뀌어 select(level=2) 로는 볼 수 없다.
+    규칙이 사는 자리를 직접 본다.
+    """
+    ch = night.notifier.channels
+    assert ch._voice_allowed("SAFETY") is True
+    assert ch._voice_allowed("HYDRATION_PROMPT") is False
 
 
 def test_display_node_is_channel(c):

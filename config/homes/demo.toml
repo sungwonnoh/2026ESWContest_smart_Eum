@@ -104,10 +104,10 @@ id = "vs-07"
 type = "power"
 area = "kitchen"
 roles = ["MEAL_HEAT"]
-source = "mock"
-node = "esp32-1"
+source = "tasmota"
+tasmota_topic = "Smartplug_D7034D"
 power_profile = "microwave"
-note = "전자레인지"
+note = "전자레인지 — Tasmota 플러그. 이 펌웨어는 Topic 변경이 막혀 공장값을 쓴다"
 
 
 # ============================================================ 방1

@@ -34,6 +34,7 @@ class ConfigError(ValueError):
 class BridgeSensor:
     vid: str
     sensor_type: str
+    topic: str | None = None     # Tasmota 쪽 토픽. None 이면 <접두어><vid>
 
 
 def load_sensors(home_path: Path) -> tuple[BridgeSensor, ...]:
@@ -72,7 +73,11 @@ def sensors_from(
                 f"{where}: {vid} 의 type={stype!r} 은 브리지가 아직 모름 "
                 f"(가능: {sorted(SUPPORTED_TYPES)})"
             )
-        out.append(BridgeSensor(vid=vid.strip(), sensor_type=stype))
+        out.append(BridgeSensor(
+            vid=vid.strip(),
+            sensor_type=stype,
+            topic=_topic(item, vid, where),
+        ))
 
     seen = [s.vid for s in out]
     dup = sorted({v for v in seen if seen.count(v) > 1})
@@ -88,6 +93,7 @@ SUPPORTED_DEVICE_TYPES = frozenset({"smart_light"})
 class BridgeDevice:
     vid: str
     device_type: str
+    topic: str | None = None
 
 
 def load_devices(home_path: Path) -> tuple[BridgeDevice, ...]:
@@ -126,10 +132,34 @@ def devices_from(
                 f"{where}: {vid} 의 device_type={dtype!r} 은 브리지가 아직 모름 "
                 f"(가능: {sorted(SUPPORTED_DEVICE_TYPES)})"
             )
-        out.append(BridgeDevice(vid=vid.strip(), device_type=dtype))
+        out.append(BridgeDevice(
+            vid=vid.strip(),
+            device_type=dtype,
+            topic=_topic(item, vid, where),
+        ))
 
     seen = [d.vid for d in out]
     dup = sorted({v for v in seen if seen.count(v) > 1})
     if dup:
         raise ConfigError(f"{where}: 중복 id {dup}")
     return tuple(out)
+
+
+# 헬퍼
+def _topic(item: dict[str, Any], vid: str, where: Path | str) -> str | None:
+    """tasmota_topic — 기기의 토픽을 <접두어><vid> 로 바꿀 수 없을 때만 적는다.
+
+    Tasmota 의 Topic 은 보통 콘솔에서 바꿀 수 있지만, 제조사가 설정을
+    파일로 고정해 둔 펌웨어가 있다 (Status 6 에 MqttTopic 이 아예 없다).
+    그런 기기는 공장 토픽을 그대로 두고 여기에 적는다.
+
+    엔진의 config 로더는 모르는 키를 무시하므로 같은 파일을 공유해도 안전하다.
+    """
+    raw = item.get("tasmota_topic")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ConfigError(f"{where}: {vid} 의 tasmota_topic 이 비어 있음")
+    if "/" in raw or "+" in raw or "#" in raw:
+        raise ConfigError(f"{where}: {vid} 의 tasmota_topic 에 MQTT 특수문자: {raw!r}")
+    return raw.strip()
