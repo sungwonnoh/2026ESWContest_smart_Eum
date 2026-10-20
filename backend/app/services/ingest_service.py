@@ -91,6 +91,12 @@ class IngestService:
 
     def handle(self, topic: str, raw: bytes | str) -> bool:
         """처리했으면 True, 버렸으면 False."""
+        if not raw or not raw.strip():
+            # 빈 retained 는 '보관값을 지워라' 라는 MQTT 관례다. 데이터가
+            # 아니므로 파싱하지 않는다 — 시뮬레이터의 clear 가 전 토픽에
+            # 이것을 쏜다.
+            log.debug("retained 삭제: %s", topic)
+            return False
         try:
             payload = json.loads(raw)
         except (ValueError, UnicodeDecodeError) as exc:

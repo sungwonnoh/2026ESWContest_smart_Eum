@@ -34,6 +34,7 @@ SRC_ID = "rpi5"
 SCHEMA_VERSION = 1
 
 VOICE = "voice"          # RPi4 스피커. device_type 이 아닌 예약값
+GUARDIAN = "guardian"    # 보호자 통보. 집 안 기기가 아니라 backend 가 중계한다
 
 # 종료 사유 — outcome 에 실리지는 않지만 로그와 테스트에서 쓴다.
 CLOSED_SEEN = "SEEN"
@@ -169,8 +170,13 @@ class ChannelSelector:
         affinity = tuple(self._policy(scenario, "affinity", default=[]))
         # affinity: 해당 시나리오에 어울리는 기기 종류 목록, 예: "수분 복약 알림은 냉장고를 먼저, 안되면 TV로"
 
-        # 2단계는 음성으로 전환한다 (명세의 에스컬레이션)
+        # 2단계는 음성으로 전환한다.
         if level >= 2:
+            # 보호자 통보가 붙은 시나리오(SAFETY)는 2단계가 사람을 부르는
+            # 단계다. 1단계에서 이미 음성까지 갔으므로 같은 말을 또 하지
+            # 않는다. 그 외에는 명세대로 음성으로 전환한다.
+            if bool(self._policy(scenario, "guardian", default=False)):
+                return () if GUARDIAN in exclude else (GUARDIAN,)
             if VOICE in exclude or not self._voice_allowed(scenario):
                 return ()
             return (VOICE,)
@@ -259,12 +265,9 @@ class ChannelSelector:
         return power is None or power == "ON"   # 해당 기기의 power가 ON이면 True
 
     def _voice_allowed(self, scenario: str) -> bool:
-        """quiet_hours 에는 음성을 쓰지 않는다. SAFETY 와 복약은 예외.
-
-        약은 거르면 안 된다 — 늦은 시각 처방이 있으면 그 시각에
-        말해야 한다.
+        """quiet_hours 에는 음성을 쓰지 않는다. 예외는 시나리오가 선언
         """
-        if scenario in ("SAFETY", "MEDICATION_PROMPT"):
+        if bool(self._policy(scenario, "quiet_exempt", default=False)):
             return True
         return not self._in_quiet_hours()
 

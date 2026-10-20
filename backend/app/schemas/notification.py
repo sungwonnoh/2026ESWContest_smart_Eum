@@ -12,6 +12,7 @@ NOTIFICATION_TYPES = ("INFO", "REMINDER", "WARNING", "SAFETY")
 
 # channels 의 RPi4 TTS 예약값. 장치가 아니므로 공간 변환에서 뺀다.
 VOICE_CHANNEL = "voice"
+GUARDIAN_CHANNEL = "guardian"
 
 # Context Engine scenario → Flutter 표시용 type. scenario 원본은 따로 보존한다.
 SCENARIO_TYPES: Dict[str, str] = {
