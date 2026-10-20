@@ -169,11 +169,8 @@ class _DevicesSettingsPageState extends State<DevicesSettingsPage> {
         if (_placements.containsKey(type)) {
           _placements.remove(type);
         } else {
-          final rooms = _setup?.rooms ?? const [];
-          _placements[type] = type.preferredRoomIds.firstWhere(
-            (id) => rooms.any((r) => r.id == id),
-            orElse: () => rooms.isEmpty ? '' : rooms.first.id,
-          );
+          final allowed = type.allowedRooms(_setup?.rooms ?? const []);
+          _placements[type] = allowed.isEmpty ? null : allowed.first.id;
         }
       });
 
@@ -189,7 +186,7 @@ class _DevicesSettingsPageState extends State<DevicesSettingsPage> {
           ..clear()
           ..addAll({
             for (final d in setup.devices)
-              d.type: d.roomId.isEmpty ? null : d.roomId,
+              if (!d.type.perRoom) d.type: d.roomId.isEmpty ? null : d.roomId,
           });
       }),
       canSave: () => _placements.values.every((v) => v != null && v.isNotEmpty),
@@ -220,7 +217,8 @@ class _DevicesSettingsPageState extends State<DevicesSettingsPage> {
                     title: _placements[type] == null
                         ? '${type.label} · 위치를 선택하세요'
                         : type.label,
-                    rooms: rooms,
+                    rooms: type.allowedRooms(rooms),
+                    emptyText: DeviceLabels.missingRoomHint(type),
                     selectedRoomId: _placements[type],
                     onSelected: (roomId) =>
                         setState(() => _placements[type] = roomId),
