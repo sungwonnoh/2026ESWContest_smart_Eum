@@ -1,7 +1,7 @@
 /// 집 안의 공간.
 ///
 /// HESTIA 판단에는 방 이름보다 [roles]가 중요하다.
-/// 원룸처럼 하나의 공간이 여러 역할을 가질 수 있다.
+/// 하나의 공간이 여러 역할을 가질 수 있다.
 class Room {
   const Room({
     required this.id,
@@ -73,13 +73,6 @@ class RoomTemplate {
     RoomTemplate(id: 'bathroom', name: '욕실', roles: [RoomRole.hygiene]),
     RoomTemplate(id: 'utility', name: '다용도실', roles: [RoomRole.laundry]),
     RoomTemplate(id: 'entrance', name: '현관', roles: [RoomRole.entry]),
-    RoomTemplate(
-      id: 'studio',
-      name: '원룸',
-      roles: [RoomRole.living, RoomRole.sleep, RoomRole.meal],
-      description: '생활·수면·식사를 한 공간에서',
-    ),
-    RoomTemplate(id: 'other', name: '기타', roles: []),
   ];
 
   static RoomTemplate? byId(String id) {

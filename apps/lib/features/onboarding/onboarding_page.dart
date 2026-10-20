@@ -232,7 +232,8 @@ class _StepBody extends StatelessWidget {
                 child: DevicePlacementRow(
                   icon: DeviceLabels.icon(type),
                   title: type.label,
-                  rooms: controller.rooms,
+                  rooms: type.allowedRooms(controller.rooms),
+                  emptyText: DeviceLabels.missingRoomHint(type),
                   selectedRoomId: controller.placements[type],
                   onSelected: (roomId) => controller.place(type, roomId),
                 ),
