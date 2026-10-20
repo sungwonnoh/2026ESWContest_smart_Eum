@@ -21,7 +21,6 @@ class OnboardingController extends ChangeNotifier {
   final Set<String> _roomIds = {'living', 'bedroom', 'kitchen', 'entrance'};
   final Set<DeviceType> _devices = {
     DeviceType.tv,
-    DeviceType.light,
     DeviceType.airConditioner,
     DeviceType.airPurifier,
     DeviceType.refrigerator,
@@ -108,6 +107,7 @@ class OnboardingController extends ChangeNotifier {
             type: type,
             roomId: _placements[type] ?? '',
           ),
+        ...DeviceType.perRoomDevices(rooms),
       ],
       preferences: _preferences,
     );
@@ -132,17 +132,12 @@ class OnboardingController extends ChangeNotifier {
     }
   }
 
-  /// 입력 편의를 위한 기본 배치. 사용자가 바꿀 수 있다.
+  /// 입력 편의를 위한 기본 배치. 둘 수 있는 공간이 없으면 비워 둔다.
   void _fillDefaultPlacements() {
-    final selected = rooms;
-    if (selected.isEmpty) return;
     for (final type in _devices) {
       if (_placements.containsKey(type)) continue;
-      final preferred = type.preferredRoomIds.firstWhere(
-        _roomIds.contains,
-        orElse: () => selected.first.id,
-      );
-      _placements[type] = preferred;
+      final allowed = type.allowedRooms(rooms);
+      if (allowed.isNotEmpty) _placements[type] = allowed.first.id;
     }
   }
 }

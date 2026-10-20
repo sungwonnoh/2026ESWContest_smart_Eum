@@ -92,13 +92,13 @@ void main() {
 
   test('HomeSetup JSON 왕복', () {
     const setup = HomeSetup(
-      rooms: [Room(id: 'studio', name: '원룸', roles: ['LIVING', 'SLEEP'])],
+      rooms: [Room(id: 'living', name: '거실', roles: ['LIVING', 'SLEEP'])],
       devices: [
         Device(
           id: 'tv-01',
-          name: '원룸 TV',
+          name: '거실 TV',
           type: DeviceType.tv,
-          roomId: 'studio',
+          roomId: 'living',
         ),
       ],
       preferences: UserPreferences(
@@ -114,9 +114,33 @@ void main() {
     expect(restored.preferences.safety.enabled, isTrue);
   });
 
-  test('원룸 템플릿은 여러 role을 가진다', () {
-    final studio = RoomTemplate.byId('studio')!.toRoom();
-    expect(studio.roles, containsAll(['LIVING', 'SLEEP', 'MEAL']));
+  test('공간 목록은 demo.toml areas 와 같다', () {
+    expect(
+      RoomTemplate.catalog.map((t) => t.id),
+      unorderedEquals(
+          ['living', 'kitchen', 'bedroom', 'bathroom', 'utility', 'entrance']),
+    );
+  });
+
+  test('가전은 demo.toml 에 있는 공간에만 둘 수 있다', () {
+    final rooms = [for (final t in RoomTemplate.catalog) t.toRoom()];
+    List<String> ids(DeviceType t) =>
+        t.allowedRooms(rooms).map((r) => r.id).toList();
+    expect(ids(DeviceType.tv), ['living']);
+    expect(ids(DeviceType.light), ['living', 'kitchen', 'bedroom']);
+    expect(ids(DeviceType.washer), ['utility']);
+    expect(ids(DeviceType.waterPurifier), ['kitchen']);
+  });
+
+  test('조명은 고르지 않고 거실·주방·침실에 하나씩 둔다', () {
+    expect(DeviceType.selectable, isNot(contains(DeviceType.light)));
+    final rooms = [
+      for (final id in ['living', 'kitchen', 'bathroom'])
+        RoomTemplate.byId(id)!.toRoom(),
+    ];
+    final lights = DeviceType.perRoomDevices(rooms);
+    expect(lights.map((d) => d.id), ['light-living', 'light-kitchen']);
+    expect(lights.map((d) => d.name), ['거실 조명', '주방 조명']);
   });
 
   test('Context Engine activity 10종은 모두 한국어 문구가 있다', () {

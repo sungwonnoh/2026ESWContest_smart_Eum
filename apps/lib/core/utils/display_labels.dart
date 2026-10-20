@@ -136,12 +136,20 @@ abstract final class RoomLabels {
         'bathroom' => Icons.bathtub_rounded,
         'utility' => Icons.wash_rounded,
         'entrance' => Icons.door_front_door_rounded,
-        'studio' => Icons.cottage_rounded,
         _ => Icons.meeting_room_rounded,
       };
 }
 
 abstract final class DeviceLabels {
+  /// 둘 수 있는 공간을 하나도 고르지 않았을 때의 안내.
+  static String missingRoomHint(DeviceType type) =>
+      '${type.allowedRoomIds.map(RoomLabels.name).join(', ')} 공간을 먼저 선택하세요.';
+
+  /// 공간마다 자동으로 두는 가전 안내.
+  static String perRoomNote(DeviceType type) =>
+      '${type.label}은 ${type.allowedRoomIds.map(RoomLabels.name).join('·')}에 '
+      '하나씩 자동으로 등록됩니다.';
+
   static IconData icon(DeviceType type) => switch (type) {
         DeviceType.tv => Icons.tv_rounded,
         DeviceType.light => Icons.lightbulb_rounded,

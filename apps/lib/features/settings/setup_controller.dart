@@ -33,7 +33,9 @@ class SetupController extends AsyncController<HomeSetup> {
     ];
     final devices = [
       for (final d in setup.devices)
-        roomIds.contains(d.roomId) ? d : d.copyWith(roomId: ''),
+        if (!d.type.perRoom)
+          roomIds.contains(d.roomId) ? d : d.copyWith(roomId: ''),
+      ...DeviceType.perRoomDevices(rooms),
     ];
     await _save(HomeSetup(
       rooms: rooms,
@@ -44,7 +46,10 @@ class SetupController extends AsyncController<HomeSetup> {
 
   /// 가전 구성과 위치를 바꾼다. 기존 가전은 id와 상태를 유지한다.
   Future<void> saveDevices(Map<DeviceType, String> placements) async {
-    final existing = {for (final d in setup.devices) d.type: d};
+    final existing = {
+      for (final d in setup.devices)
+        if (!d.type.perRoom) d.type: d,
+    };
     final roomNames = {for (final r in setup.rooms) r.id: r.name};
     final devices = [
       for (final type in DeviceType.selectable)
@@ -60,6 +65,7 @@ class SetupController extends AsyncController<HomeSetup> {
             roomId: placements[type],
             name: '${roomNames[placements[type]] ?? ''} ${type.label}'.trim(),
           ),
+      ...DeviceType.perRoomDevices(setup.rooms),
     ];
     await _save(HomeSetup(
       rooms: setup.rooms,

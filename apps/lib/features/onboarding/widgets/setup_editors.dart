@@ -50,17 +50,27 @@ class DeviceSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final type in DeviceType.selectable)
-          SelectionTile(
-            icon: DeviceLabels.icon(type),
-            label: type.label,
-            selected: selected.contains(type),
-            onTap: () => onToggle(type),
-          ),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final type in DeviceType.selectable)
+              SelectionTile(
+                icon: DeviceLabels.icon(type),
+                label: type.label,
+                selected: selected.contains(type),
+                onTap: () => onToggle(type),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          DeviceLabels.perRoomNote(DeviceType.light),
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
       ],
     );
   }
@@ -75,11 +85,15 @@ class DevicePlacementRow extends StatelessWidget {
     required this.rooms,
     required this.selectedRoomId,
     required this.onSelected,
+    this.emptyText,
   });
 
   final IconData icon;
   final String title;
+
+  /// 둘 수 있는 공간만 넘긴다. 비어 있으면 [emptyText]를 보여 준다.
   final List<Room> rooms;
+  final String? emptyText;
   final String? selectedRoomId;
   final ValueChanged<String> onSelected;
 
@@ -103,6 +117,8 @@ class DevicePlacementRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
+          if (rooms.isEmpty && emptyText != null)
+            Text(emptyText!, style: Theme.of(context).textTheme.bodyLarge),
           Wrap(
             spacing: 10,
             runSpacing: 10,
