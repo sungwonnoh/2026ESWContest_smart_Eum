@@ -73,6 +73,19 @@ class BridgeService:
         self._devices = {d.vid: d for d in devices}
         self._shadow: dict[str, LightShadow] = {d.vid: LightShadow() for d in devices}
         self._prefix = topic_prefix
+
+        # vid ↔ Tasmota 토픽. 설정이 적어두지 않았으면 <접두어><vid> 다.
+        self._topic_of: dict[str, str] = {}
+        for item in (*sensors, *devices):
+            self._topic_of[item.vid] = item.topic or f"{topic_prefix}{item.vid}"
+
+        dup = [t for t in self._topic_of.values()
+               if list(self._topic_of.values()).count(t) > 1]
+        if dup:
+            raise ValueError(f"두 기기가 같은 Tasmota 토픽을 씁니다: {sorted(set(dup))}")
+
+        self._vid_of: dict[str, str] = {t: v for v, t in self._topic_of.items()}
+
         self._seq: dict[str, int] = {}
         self._offset: float = 0.0            # 시연용 가상 시계
         self._online: dict[str, bool] = {}
@@ -90,6 +103,9 @@ class BridgeService:
     def is_sensor(self, vid: str) -> bool:
         return vid in self._sensors
 
+    def tasmota_topic(self, vid: str) -> str:
+        return self._topic_of[vid]
+
     def subscriptions(self) -> tuple[str, ...]:
         """센서 쪽 구독.
 
@@ -98,7 +114,7 @@ class BridgeService:
         """
         out: list[str] = []
         for vid in self._sensors:
-            base = f"tele/{self._prefix}{vid}"
+            base = f"tele/{self._topic_of[vid]}"
             out.append(base + SENSOR_SUFFIX)
             out.append(base + LWT_SUFFIX)
         return tuple(out)
@@ -107,28 +123,31 @@ class BridgeService:
         """가전 쪽 구독. Tasmota 응답 둘 + 생존 + 엔진의 cmd."""
         out: list[str] = []
         for vid in self._devices:
-            out.append(f"stat/{self._prefix}{vid}{RESULT_SUFFIX}")
-            out.append(f"tele/{self._prefix}{vid}{STATE_SUFFIX}")
-            out.append(f"tele/{self._prefix}{vid}{LWT_SUFFIX}")
+            t = self._topic_of[vid]
+            out.append(f"stat/{t}{RESULT_SUFFIX}")
+            out.append(f"tele/{t}{STATE_SUFFIX}")
+            out.append(f"tele/{t}{LWT_SUFFIX}")
             out.append(f"hestia/device/{vid}/cmd")
         return tuple(out)
 
     def vid_for(self, topic: str) -> tuple[str, str] | None:
-        """tele/<prefix><vid>/{SENSOR,LWT} → (vid, 접미어).
+        """tele/<토픽>/{SENSOR,LWT} → (vid, 접미어).
 
         SENSOR 는 센서만, LWT 는 센서와 가전 둘 다 — 전구가 죽어도
         브로커가 LWT 를 쓴다.
         """
-        head = f"tele/{self._prefix}"
+        head = "tele/"
         if not topic.startswith(head):
             return None
         for suffix in (SENSOR_SUFFIX, LWT_SUFFIX):
             if not topic.endswith(suffix):
                 continue
-            vid = topic[len(head): -len(suffix)]
+            vid = self._vid_of.get(topic[len(head): -len(suffix)])
+            if vid is None:
+                continue
             if suffix == SENSOR_SUFFIX and vid in self._sensors:
                 return vid, suffix
-            if suffix == LWT_SUFFIX and (vid in self._sensors or vid in self._devices):
+            if suffix == LWT_SUFFIX:
                 return vid, suffix
         return None
 
@@ -140,14 +159,11 @@ class BridgeService:
         return vid if vid in self._devices else None
 
     def result_vid(self, topic: str) -> str | None:
-        """stat/<prefix><vid>/RESULT · tele/<prefix><vid>/STATE → vid."""
-        for head, suffix in (
-            (f"stat/{self._prefix}", RESULT_SUFFIX),
-            (f"tele/{self._prefix}", STATE_SUFFIX),
-        ):
+        """stat/<토픽>/RESULT · tele/<토픽>/STATE → vid."""
+        for head, suffix in (("stat/", RESULT_SUFFIX), ("tele/", STATE_SUFFIX)):
             if topic.startswith(head) and topic.endswith(suffix):
-                vid = topic[len(head): -len(suffix)]
-                if vid in self._devices:
+                vid = self._vid_of.get(topic[len(head): -len(suffix)])
+                if vid is not None and vid in self._devices:
                     return vid
         return None
 
@@ -160,11 +176,11 @@ class BridgeService:
         return f"hestia/device/{vid}/state"
 
     def cmnd_topic(self, vid: str) -> str:
-        return f"cmnd/{self._prefix}{vid}/Backlog"
+        return f"cmnd/{self._topic_of[vid]}/Backlog"
 
     def query_topic(self, vid: str) -> str:
         """현재 상태를 물어보는 토픽. 빈 페이로드를 쏘면 STATE 가 온다."""
-        return f"cmnd/{self._prefix}{vid}/State"
+        return f"cmnd/{self._topic_of[vid]}/State"
 
     # ============================================================ 가상 시계
 
