@@ -90,7 +90,7 @@ PERSONAS = {
     ),
     "p2": Persona(
         key="p2",
-        note="78세 독거. 야간뇨 없음, 아침 식사를 거르고 점심·저녁만 먹는 생활 패턴",
+        note="78세 독거. 야간뇨 없음, 아침 식사를 거르고 점심(11시)·저녁(17시)만 먹는 생활 패턴",
         bed_min=22 * 60 + 10, bed_sd=25,
         wake_min=6 * 60 + 50, wake_sd=20,
         nocturia=((0, 0.0),),
@@ -98,8 +98,8 @@ PERSONAS = {
         in_bed_wake_p=0.0,
         nap_p=0.25, nap_min=13 * 60 + 30,
         meals=(
-            ("lunch", 12 * 60 + 20, 25, 0.08, 0.5),
-            ("dinner", 18 * 60, 25, 0.03, 0.8),
+            ("lunch", 11 * 60, 25, 0.08, 0.5),
+            ("dinner", 17 * 60, 25, 0.03, 0.8),
         ),
         hydration_per_day=(4, 7),
         outing_p=0.5,
