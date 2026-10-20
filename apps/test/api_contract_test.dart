@@ -222,6 +222,7 @@ void main() {
       expect(w.precipType.wireName, rawWeather['precipType']);
       expect(w.windSpeedMs, rawWeather['windSpeedMs']);
       expect(w.stale, rawWeather['stale']);
+      expect(w.demo, rawWeather['demo']);
       expect(w.warnings!.map((x) => x.toJson()), rawWeather['warnings']);
       expect(WeatherLabels.details(w), isNotEmpty);
     });

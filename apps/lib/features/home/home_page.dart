@@ -351,6 +351,7 @@ class _WeatherSection extends StatelessWidget {
                       ],
                     ),
                   ),
+                  if (weather.demo) const _DemoBadge(),
                 ],
               ),
               if (warnings.isNotEmpty) ...[
@@ -376,6 +377,31 @@ class _WeatherSection extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 시연 모드 값임을 알린다. 실제 날씨로 오해하지 않도록.
+class _DemoBadge extends StatelessWidget {
+  const _DemoBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '시연',
+        style: TextStyle(
+          color: scheme.onTertiaryContainer,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }

@@ -68,6 +68,7 @@ class Weather {
     this.windSpeedMs,
     this.warnings,
     this.stale = false,
+    this.demo = false,
   });
 
   final String locationName;
@@ -87,6 +88,9 @@ class Weather {
 
   /// 관측이 오래됨 (RPi4 갱신이 끊겼을 수 있다).
   final bool stale;
+
+  /// 시연 모드 값. 폭염 특보·기온·습도가 실제가 아니다.
+  final bool demo;
 
   bool get raining =>
       precipType != PrecipType.none && precipType != PrecipType.unknown;
@@ -110,6 +114,7 @@ class Weather {
               .toList()
           : null,
       stale: json['stale'] as bool? ?? false,
+      demo: json['demo'] as bool? ?? false,
     );
   }
 }

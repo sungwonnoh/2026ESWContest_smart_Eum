@@ -3,6 +3,7 @@
     수신  hestia/external/weather       update(새 실황·특보 변경) / reply(get 응답)
     발행  hestia/external/weather/get   MQTT 에 (재)연결될 때마다. retained 가 아니라서
                                         재시작 직후에는 이렇게 받아야 바로 날씨가 생긴다
+    발행  hestia/external/weather/demo  앱의 시연 모드. RPi4 가 폭염 특보를 덧씌워 다시 보낸다
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 
 WEATHER_TOPIC = "hestia/external/weather"
 WEATHER_GET_TOPIC = "hestia/external/weather/get"
+WEATHER_DEMO_TOPIC = "hestia/external/weather/demo"
 
 
 class WeatherService:
@@ -51,6 +53,19 @@ class WeatherService:
             log.warning("날씨 요청 발행 실패")
         return sent
 
+    def set_demo(self, heat: bool) -> bool:
+        """시연 모드 켜기/끄기. retained 가 아니어서 RPi4 가 재시작하면 꺼진다."""
+        sent = self._mqtt.publish(
+            WEATHER_DEMO_TOPIC,
+            {"version": SCHEMA_VERSION, "sent_ts": int(self._clock()), "src_id": self._src_id,
+             "heat": heat},
+            qos=1,
+            retain=False,
+        )
+        if not sent:
+            log.warning("시연 모드 발행 실패")
+        return sent
+
     def latest(self) -> Weather | None:
         with self._lock:
             p = self._latest
@@ -68,4 +83,5 @@ class WeatherService:
                 WeatherWarning(name=w.name, type=w.type, level=w.level) for w in p.warnings
             ],
             stale=self._clock() - float(p.observed_at) > WEATHER_STALE_SEC,
+            demo=p.demo,
         )

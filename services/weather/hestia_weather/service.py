@@ -6,6 +6,9 @@
 실황: 관측이 매시 정시 한 번이라 더 자주 조회해도 값은 같다.
       정시 + settle_min 에 조회하고, 이번 정시 자료가 아직이면 retry_sec 마다 다시 본다.
 특보: 발표는 아무 때나 나오므로 warn_poll_sec 마다 본다.
+
+시연 모드: 켜져 있는 동안 발행 직전에 폭염주의보와 여름 기온·습도를 덧씌우고 demo=true 를 붙인다.
+          조회는 그대로 하므로 관측 시각·강수·풍속·다른 특보는 실제 값이다. demo_ttl_sec 뒤 저절로 꺼진다.
 """
 
 from __future__ import annotations
@@ -20,6 +23,11 @@ log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 HOUR_SEC = 3600
+
+DEMO_HEAT = {"name": "폭염주의보", "type": "HEAT", "level": "ADVISORY"}
+DEMO_TEMPERATURE_C = 33.0
+DEMO_HUMIDITY_PCT = 60.0
+DEMO_TTL_SEC = 3600
 
 
 @dataclass(frozen=True)
@@ -58,6 +66,7 @@ class WeatherService:
         self.warnings: Warnings | None = None   # None = 아직 모름 (조회 전·실패)
         self.next_poll: float = 0.0             # 0 → 기동 직후 바로 조회
         self.next_warn_poll: float = 0.0
+        self.demo_until: float = 0.0            # 0 → 시연 모드 꺼짐
 
     # ------------------------------------------------------------ push
 
@@ -130,11 +139,44 @@ class WeatherService:
     def is_stale(self, now: float) -> bool:
         return self.cache is None or now - self.cache.observed_at > self._stale_sec
 
+    # ------------------------------------------------------------ 시연
+
+    def set_demo(self, on: bool, now: float, ttl_sec: float = DEMO_TTL_SEC) -> bool:
+        """시연 모드를 켜거나 끈다. 발행할 내용이 바뀌었으면 True."""
+        was = self.demo_active(now)
+        self.demo_until = now + ttl_sec if on else 0.0
+        log.info("시연 모드 %s", f"켜짐 ({ttl_sec:.0f}초)" if on else "꺼짐")
+        return (on or was) and self.cache is not None
+
+    def demo_active(self, now: float) -> bool:
+        return now < self.demo_until
+
+    def demo_expired(self, now: float) -> bool:
+        """시연 시간이 방금 지났으면 한 번만 True — 실제 값을 다시 발행할 때."""
+        if self.demo_until and now >= self.demo_until:
+            self.demo_until = 0.0
+            log.info("시연 모드 시간 만료 — 실제 값으로 돌아감")
+            return self.cache is not None
+        return False
+
     # ------------------------------------------------------------ payload
 
     def payload(self, *, reason: str, now: float) -> dict[str, Any]:
         if self.cache is None:
             raise ValueError("실황이 없어 payload 를 만들 수 없음")
+        out = self._real_payload(reason=reason, now=now)
+        if self.demo_active(now):
+            warnings = [w for w in out["warnings"] or [] if w["type"] != "HEAT"]
+            out.update(
+                temperature_c=DEMO_TEMPERATURE_C,
+                humidity_pct=DEMO_HUMIDITY_PCT,
+                warnings=[*warnings, dict(DEMO_HEAT)],
+                warnings_issued_at=out["warnings_issued_at"] or int(now),
+                demo=True,
+            )
+        return out
+
+    def _real_payload(self, *, reason: str, now: float) -> dict[str, Any]:
         w = self.warnings
         return {
             "version": SCHEMA_VERSION,
