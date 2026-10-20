@@ -15,6 +15,7 @@ from ..schemas.common import SCHEMA_VERSION
 from ..schemas.notification import (
     PRIORITIES,
     SCENARIO_TYPES,
+    GUARDIAN_CHANNEL,
     VOICE_CHANNEL,
     NotificationOut,
     NotifyAckPayload,
@@ -48,7 +49,7 @@ def scenario_type(scenario: str, priority: str) -> str:
 def channel_room(channels: list[str], area_of: Callable[[str], str | None]) -> str | None:
     """발송 채널(virtual_id) 중 registry 에서 공간을 찾은 첫 번째. 없으면 None."""
     for vid in channels:
-        if vid == VOICE_CHANNEL:
+        if vid in (VOICE_CHANNEL, GUARDIAN_CHANNEL):
             continue
         area = area_of(vid)
         if area:
@@ -89,13 +90,15 @@ class NotificationService:
         self._clock = clock
         self._telegram = telegram
 
+        self._guardian_sent: set[str] = set()
+
     # ------------------------------------------------------------ MQTT 입력
 
     def on_push(self, p: NotifyPushPayload, raw: dict[str, Any]) -> NotificationRecord | None:
         """새 알림이면 저장하고 돌려준다. 이미 받은 알림이면 None."""
         priority = p.priority.lower() if p.priority.lower() in PRIORITIES else "normal"
         room_id = channel_room(p.channels, self._area_of)
-        devices = [c for c in p.channels if c != VOICE_CHANNEL]
+        devices = [c for c in p.channels if c not in (VOICE_CHANNEL, GUARDIAN_CHANNEL)]
         if devices and room_id is None:
             # 앱 설정으로 대신 찾지 않는다. registry 가 정본이다.
             log.warning("registry 에서 알림 공간을 찾지 못함: %s channels=%s",
@@ -113,22 +116,27 @@ class NotificationService:
             explanation_id=None,
             created_at=float(p.sent_ts),
         )
-        if not self._history.add_notification(record, raw):
-            return None
+        
+        is_new = self._history.add_notification(record, raw)
 
         # 첫 사용자 확인 알림은 보호자에게 보내지 않는다. Context Engine이
         # 무응답으로 다음 단계에 올린 SAFETY만 보호자 채널로 전달한다.
         if (
             self._telegram is not None
             and record.type == "SAFETY"
-            and (p.escalation_level or 0) >= 2
+            and GUARDIAN_CHANNEL in p.channels
+            and record.id not in self._guardian_sent    # 재연결로 겹쳐도 한 번만
         ):
+            self._guardian_sent.add(record.id)
             self._telegram.send_fall_escalation(
                 title=record.title,
                 message=record.message,
                 notify_id=record.id,
                 sent_ts=float(p.sent_ts),
             )
+
+        if not is_new:
+            return None        # 저장은 중복이다 — 앱 목록에 다시 올리지 않는다
         return record
 
     def on_ack(self, ack: NotifyAckPayload, recv_ts: float) -> bool:
