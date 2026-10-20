@@ -7,7 +7,7 @@ from hestia_engine.config import load
 from hestia_engine.engine import Engine, RecordingPublisher
 from hestia_engine.timers import Scheduler
 from hestia_engine.world import WorldState
-from hestia_engine.notify import CLOSED_TIMEOUT, VOICE
+from hestia_engine.notify import CLOSED_TIMEOUT, VOICE, GUARDIAN
 
 from test_activity import HOME, POLICY, MORNING
 
@@ -186,11 +186,16 @@ def test_pierces_daily_limit(c):
 
 
 def test_voice_pierces_quiet_hours(c, tmp_path):
-    """정숙 시간대에도 음성을 쓴다."""
-    from hestia_engine.notify import VOICE
+    """정숙 시간대에도 음성을 쓴다.
 
-    night = Ctx(tmp_path, start=MORNING + 50400)      # 23시경
-    assert night.engine.notifier.channels.select("SAFETY", None, level=2) == (VOICE,)
+    예전에는 SAFETY 의 2단계가 곧 음성이라 select(level=2) 로 확인했지만,
+    2단계가 보호자 통보로 바뀌어 그 경로로는 볼 수 없다. 1단계는 근접
+    기기가 먼저 잡혀 음성까지 내려오지 않는다. 규칙이 사는 자리를 본다.
+    """
+    ch = Ctx(tmp_path, start=MORNING + 50400).engine.notifier.channels   # 23시경
+
+    assert ch._voice_allowed("SAFETY") is True
+    assert ch._voice_allowed("HYDRATION_PROMPT") is False
 
 
 # ============================================================ 타이머
@@ -246,7 +251,7 @@ def test_complied_when_moving_again(c):
     assert len(c.pushes()) == 1
 
     c.at(MORNING + STILL_LIMIT + 100).bathroom(True, energy=50, seq=3)
-    c.at(MORNING + STILL_LIMIT + 1000)
+    c.at(MORNING + STILL_LIMIT + 2000)      # 1000 에서 변경 — comply 창이 30분이다
     c.sched.run_due()
 
     outs = [o for o in c.of("intervention/outcome") if o["scenario"] == "SAFETY"]
@@ -262,7 +267,7 @@ def test_not_complied_when_still(c):
     c.bathroom(True, energy=3)
     c.at(MORNING + STILL_LIMIT + 10).bathroom(True, energy=3, seq=2)
 
-    c.at(MORNING + STILL_LIMIT + 1000)
+    c.at(MORNING + STILL_LIMIT + 2000)      # 1000 에서 변경
     c.sched.run_due()
 
     outs = [o for o in c.of("intervention/outcome") if o["scenario"] == "SAFETY"]
@@ -287,23 +292,26 @@ def test_escalates_without_limit(c):
     assert n.escalation_level >= 2
 """
 
-def test_escalation_ends_when_no_channel_left(c):
+def test_escalates_to_guardian_when_still(c):
     """화장실에 화면이 없으면 1단계가 이미 음성이다.
 
-    TV 는 디스플레이로 대행되는데 화장실에 디스플레이가 없어
-    폴백으로 음성이 간다. 음성으로 두 번 말해봐야 의미가 없으니
-    거기서 끝난다 — 보호자 통보가 3단계로 붙으면 이어진다.
+    음성을 두 번 보낼 수는 없지만 보호자 채널은 남는다. 이 경로가
+    없으면 escalation_level 이 2에 닿지 못해, backend 의 텔레그램
+    중계가 코드로만 있고 영영 발화하지 않는다.
     """
     c.device("vd-01", "smart_tv")
     c.bathroom(True, energy=3)
     c.at(MORNING + STILL_LIMIT + 10).bathroom(True, energy=3, seq=2)
 
     assert c.pushes()[0]["channels"] == [VOICE]
-
     nid = c.pushes()[0]["notify_id"]
-    c.at(MORNING + STILL_LIMIT + 200)
+
+    # 1단계 발송 뒤 10분. 그동안 움직임이 없었다.
+    c.at(MORNING + STILL_LIMIT + 700)
     c.sched.run_due()
 
     n = c.engine.notifier.store.get(nid)
-    assert n.escalation_level == 1
-    assert n.closed_reason == CLOSED_TIMEOUT
+    assert n.escalation_level == 2
+    assert n.channels == (GUARDIAN,)
+    assert n.is_open                       # 보호자를 부른 뒤에도 열려 있다
+    assert c.pushes()[-1]["channels"] == [GUARDIAN]
