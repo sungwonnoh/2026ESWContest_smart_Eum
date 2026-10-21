@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/exit_app.dart';
 import '../../app/hestia_scope.dart';
 import '../../app/routes.dart';
 import '../../app/theme.dart';
@@ -73,7 +74,10 @@ class _NotificationDetailPageState extends State<NotificationDetailPage> {
   Widget build(BuildContext context) {
     final center = HestiaScope.of(context).notifications;
     return Scaffold(
-      appBar: AppBar(title: const Text('알림 상세')),
+      appBar: AppBar(
+        title: const Text('알림 상세'),
+        actions: const [ExitAppButton()],
+      ),
       body: ListenableBuilder(
         listenable: center,
         builder: (context, _) {
