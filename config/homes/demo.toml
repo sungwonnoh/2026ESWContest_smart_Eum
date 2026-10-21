@@ -126,7 +126,7 @@ id = "vs-09"
 type = "bed"
 area = "bedroom"
 roles = ["SLEEP"]
-source = "mock"
+source = "esp32"
 node = "esp32-1"
 note = "침대 압력 패드 — wake_t0 의 주 신호"
 
@@ -135,7 +135,7 @@ id = "vs-10"
 type = "motion"
 area = "bedroom"
 roles = ["SLEEP"]
-source = "mock"
+source = "esp32"
 node = "esp32-1"
 note = "방문 PIR"
 

@@ -7,6 +7,7 @@
 
 static const uint8_t  MAX_PIR    = 4;
 static const uint32_t DEBOUNCE_MS = 200;
+static const uint32_t OFF_SETTLE_MS   = 3000;   // true → false
 static const uint32_t WARMUP_MS = 30000;   // 전원 후 안정화
 
 struct PirState {
@@ -66,6 +67,7 @@ void pirTick(const hestia::SensorSlot& slot) {
     }
 
     if (now == st->last) return;
+    const uint32_t need = now ? DEBOUNCE_MS : OFF_SETTLE_MS;
     if (t - st->lastChange < DEBOUNCE_MS) return;
 
     st->last       = now;
