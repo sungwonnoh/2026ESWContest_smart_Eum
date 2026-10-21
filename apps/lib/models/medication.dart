@@ -39,8 +39,8 @@ class MedicationSchedule {
   /// 정해진 시각만. "HH:MM".
   final List<String> times;
 
-  /// 앱에서 고를 수 있는 식후 지연 (분).
-  static const afterMealDelays = [0, 30];
+  /// 앱이 등록하는 식후 지연 (분). 고르지 않고 항상 이 값이다.
+  static const afterMealDelayMin = 30;
 
   static const maxTimes = 6;
 
