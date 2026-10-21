@@ -477,7 +477,10 @@ class _ChoiceWrap extends StatelessWidget {
   final List<Widget> children;
 
   static const _gap = 12.0;
-  static const _minWidth = 150.0;
+
+  /// 아이콘·체크·여백(약 110px) + "고지혈증약" 한 줄이 들어가는 너비.
+  /// 이보다 좁게 나누면 라벨이 "혈압 / 약" 처럼 꺾인다.
+  static const _minWidth = 220.0;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -566,12 +569,19 @@ class _ChoiceButton extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: fg,
+                        // 라벨은 한 줄. 그래도 좁으면 줄바꿈 대신 글자를 줄인다.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: fg,
+                            ),
                           ),
                         ),
                         if (caption != null)
