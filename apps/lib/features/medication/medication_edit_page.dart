@@ -106,11 +106,7 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
     MedicationStep.name: ('무슨 약인가요?', '자주 드시는 약을 고르거나 직접 입력하세요.'),
     MedicationStep.type: (
       '언제 드세요?',
-      '끼니마다 식후에 드시면 "식후", 그 밖에는 "정해진 시각"을 골라주세요.',
-    ),
-    MedicationStep.delay: (
-      '식사 후 언제 드세요?',
-      '약 봉투에 적힌 대로 골라주세요. 끼니마다(하루 최대 세 번) 알려드려요.',
+      '끼니마다 식후에 드시면 "식후"(식후 30분), 그 밖에는 "정해진 시각"을 골라주세요.',
     ),
     MedicationStep.times: (
       '몇 시에 드세요?',
@@ -132,7 +128,7 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
               _ChoiceButton(
                 icon: MedicationLabels.typeIcon(ScheduleType.afterMeal),
                 label: ScheduleType.afterMeal.label,
-                caption: '감기약처럼 끼니마다',
+                caption: '끼니마다 식후 30분에 알려드려요',
                 selected: c.type == ScheduleType.afterMeal,
                 onTap: () => c.setType(ScheduleType.afterMeal),
               ),
@@ -143,17 +139,6 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
                 selected: c.type == ScheduleType.fixed,
                 onTap: () => c.setType(ScheduleType.fixed),
               ),
-            ],
-          ),
-        MedicationStep.delay => _ChoiceWrap(
-            children: [
-              for (final minutes in MedicationSchedule.afterMealDelays)
-                _ChoiceButton(
-                  icon: MedicationLabels.delayIcon(minutes),
-                  label: MedicationSchedule.delayLabel(minutes),
-                  selected: c.delay == minutes,
-                  onTap: () => c.setDelay(minutes),
-                ),
             ],
           ),
         MedicationStep.times => _TimesStep(controller: c),
@@ -362,13 +347,10 @@ class _Summary extends StatelessWidget {
     final m = controller.build();
     final rows = [
       (MedicationStep.name, '약 이름', m.name),
-      (MedicationStep.type, '언제', m.schedule.type.label),
       if (m.schedule.type == ScheduleType.afterMeal)
-        (
-          MedicationStep.delay,
-          '식사 후',
-          '${MedicationSchedule.delayLabel(m.schedule.delayMin ?? 30)} · 끼니마다',
-        ),
+        (MedicationStep.type, '언제', m.schedule.label)
+      else
+        (MedicationStep.type, '언제', m.schedule.type.label),
       if (m.schedule.type == ScheduleType.fixed)
         (MedicationStep.times, '시각', m.schedule.sortedTimes.join(' · ')),
       (MedicationStep.days, '기간', '${m.days}일분'),
@@ -487,14 +469,49 @@ class _StepHeader extends StatelessWidget {
   }
 }
 
+/// 선택 버튼 격자. 문구 길이와 상관없이 같은 크기로 맞춘다 —
+/// 한 줄에 같은 개수를 같은 너비로 두고, 줄 안에서는 가장 높은 버튼에 높이를 맞춘다.
 class _ChoiceWrap extends StatelessWidget {
   const _ChoiceWrap({required this.children});
 
   final List<Widget> children;
 
+  static const _gap = 12.0;
+  static const _minWidth = 150.0;
+
   @override
-  Widget build(BuildContext context) =>
-      Wrap(spacing: 12, runSpacing: 12, children: children);
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final fit =
+              ((constraints.maxWidth + _gap) / (_minWidth + _gap)).floor();
+          final columns = fit.clamp(1, children.length);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < children.length; i += columns)
+                Padding(
+                  padding: EdgeInsets.only(top: i == 0 ? 0 : _gap),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var j = i; j < i + columns; j++) ...[
+                          if (j > i) const SizedBox(width: _gap),
+                          // 마지막 줄이 덜 차도 너비는 다른 줄과 같다
+                          Expanded(
+                            child: j < children.length
+                                ? children[j]
+                                : const SizedBox.shrink(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      );
 }
 
 /// 큰 선택 버튼. 고른 것은 강조색과 체크 표시로 구분한다.
@@ -534,34 +551,34 @@ class _ChoiceButton extends StatelessWidget {
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(
-              minWidth: 150,
               minHeight: HestiaSizes.primaryButtonHeight + 8,
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (icon != null) ...[
                     Icon(icon, size: 28, color: fg),
                     const SizedBox(width: 10),
                   ],
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: fg,
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: fg,
+                          ),
                         ),
-                      ),
-                      if (caption != null)
-                        Text(caption!,
-                            style: TextStyle(fontSize: 14, color: fg)),
-                    ],
+                        if (caption != null)
+                          Text(caption!,
+                              style: TextStyle(fontSize: 14, color: fg)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Icon(

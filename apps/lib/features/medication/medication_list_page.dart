@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/exit_app.dart';
 import '../../app/hestia_scope.dart';
 import '../../app/routes.dart';
 import '../../app/theme.dart';
@@ -69,7 +70,10 @@ class _MedicationListPageState extends State<MedicationListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('복약 관리')),
+      appBar: AppBar(
+        title: const Text('복약 관리'),
+        actions: const [ExitAppButton()],
+      ),
       body: SafeArea(
         child: AsyncStateView<List<Medication>>(
           controller: _controller,
