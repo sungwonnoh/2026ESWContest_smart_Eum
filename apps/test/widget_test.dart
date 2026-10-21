@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hestia_flutter_test/app/app.dart';
+import 'package:hestia_flutter_test/features/medication/medication_controllers.dart';
 import 'package:hestia_flutter_test/models/home_setup.dart';
 import 'package:hestia_flutter_test/models/room.dart';
 import 'package:hestia_flutter_test/models/user_preferences.dart';
@@ -134,6 +135,40 @@ void main() {
     await _tap(tester, find.widgetWithText(FilledButton, '나가기'));
     expect(calls, contains('SystemNavigator.pop'));
   });
+
+  for (final size in const [Size(800, 480), Size(360, 740)]) {
+    testWidgets('약 이름 버튼은 한 줄이고 줄어들지 않는다 (${size.width.toInt()}x${size.height.toInt()})',
+        (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final repo = MockHestiaRepository(
+        latency: Duration.zero,
+        initialSetup: const HomeSetup(
+          rooms: [Room(id: 'living', name: '거실')],
+          devices: [],
+          preferences: UserPreferences(),
+        ),
+      );
+      await _boot(tester, repo);
+      await _tap(tester, find.text('복약 알림 추가하기'));
+      expect(find.text('무슨 약인가요?'), findsOneWidget);
+
+      for (final name in MedicationEditController.namePresets) {
+        final label = find.text(name);
+        await tester.ensureVisible(label);
+        await tester.pumpAndSettle();
+        final box = tester.getSize(label);
+        // 한 줄 (20px 글자 한 줄 높이). "혈압 / 약" 으로 꺾이면 두 배가 된다
+        expect(box.height, lessThan(20 * 1.6), reason: '$name 줄바꿈');
+        // 화면에 그려진 너비 = 원래 너비 → FittedBox 가 줄이지 않았다
+        expect(tester.getRect(label).width, closeTo(box.width, 0.5),
+            reason: '$name 글자 축소');
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('홈에서 복약 알림을 추가하면 홈 카드에 보인다', (tester) async {
     final repo = MockHestiaRepository(
