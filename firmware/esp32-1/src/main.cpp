@@ -340,6 +340,8 @@ void loop() {
         publishStatus();
         publishAnnounce();
         sensorsResend();
+        publishDeviceState();     // vd-10 디스플레이
+        devicesPublishAll(); 
     }
 
     if (mqttUp && millis() - lastHeartbeat >= HEARTBEAT_MS) {
