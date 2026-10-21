@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/exit_app.dart';
 import '../../app/hestia_scope.dart';
 import '../../app/routes.dart';
 import '../../app/theme.dart';
@@ -102,7 +103,10 @@ class _SystemInfoPageState extends State<SystemInfoPage> {
     };
 
     return Scaffold(
-      appBar: AppBar(title: const Text('시스템 정보')),
+      appBar: AppBar(
+        title: const Text('시스템 정보'),
+        actions: const [ExitAppButton()],
+      ),
       body: Scrollbar(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),

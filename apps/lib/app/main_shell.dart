@@ -6,11 +6,12 @@ import '../features/home/home_page.dart';
 import '../features/notifications/notifications_page.dart';
 import '../features/settings/settings_page.dart';
 import '../models/notification_item.dart';
+import 'exit_app.dart';
 import 'hestia_scope.dart';
 import 'routes.dart';
 import 'theme.dart';
 
-/// [홈] [알림] [설정] 탭.
+/// [홈] [알림] [설정] 탭 + [나가기] (탭이 아니라 앱을 닫고 디스플레이 홈으로 간다).
 ///
 /// 가로가 넓은 터치스크린(예: 800x480)에서는 세로 공간을 아끼려고
 /// 왼쪽 NavigationRail을, 그 외에는 하단 NavigationBar를 쓴다.
@@ -40,7 +41,16 @@ class _MainShellState extends State<MainShell> {
     super.dispose();
   }
 
-  void _select(int index) => setState(() => _index = index);
+  /// 마지막 칸은 탭이 아니라 나가기다.
+  void _select(int index) {
+    if (index == _exitIndex) {
+      confirmExitApp(context);
+      return;
+    }
+    setState(() => _index = index);
+  }
+
+  static const _exitIndex = 3;
 
   void _showIncoming(HestiaNotification n) {
     if (!mounted) return;
@@ -103,6 +113,7 @@ class _MainShellState extends State<MainShell> {
           (Icons.home_outlined, Icons.home_rounded, '홈'),
           (Icons.notifications_outlined, Icons.notifications_rounded, '알림'),
           (Icons.settings_outlined, Icons.settings_rounded, '설정'),
+          (Icons.exit_to_app_rounded, Icons.exit_to_app_rounded, '나가기'),
         ];
 
         return LayoutBuilder(

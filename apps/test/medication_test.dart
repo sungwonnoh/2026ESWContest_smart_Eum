@@ -161,7 +161,7 @@ void main() {
       return c.save();
     }
 
-    test('식후: 식사 후 단계를 거치고 시각 단계는 없다', () async {
+    test('식후: 고르는 단계 없이 식후 30분으로 저장한다', () async {
       expect(c.canProceed, isFalse);
       c.setName('감기약');
       c.next();
@@ -170,24 +170,19 @@ void main() {
 
       c.setType(ScheduleType.afterMeal);
       c.next();
-      expect(c.step, MedicationStep.delay);
       expect(c.steps, isNot(contains(MedicationStep.times)));
-      expect(c.canProceed, isFalse);
-      c.setDelay(30);
-      c.next();
 
       final saved = await finish(c);
       expect(saved!.schedule, const MedicationSchedule.afterMeal(delayMin: 30));
       expect((await repo.getMedications()).single.name, '감기약');
     });
 
-    test('정해진 시각: 시각 단계를 거치고 식사 후 단계는 없다', () async {
+    test('정해진 시각: 시각 단계를 거친다', () async {
       c.setName('혈압약');
       c.next();
       c.setType(ScheduleType.fixed);
       c.next();
       expect(c.step, MedicationStep.times);
-      expect(c.steps, isNot(contains(MedicationStep.delay)));
       expect(c.canProceed, isFalse);
 
       c.toggleTime('20:00');
@@ -243,6 +238,18 @@ void main() {
       expect(updated.days, 14);
       expect(updated.schedule, saved.schedule);
       expect(await repo.getMedications(), hasLength(1));
+    });
+
+    test('예전 식사 직후 약도 수정하면 식후 30분으로 저장한다', () async {
+      final saved = await repo.addMedication(const Medication(
+        name: '감기약',
+        schedule: MedicationSchedule.afterMeal(delayMin: 0),
+        days: 5,
+      ));
+      final updated =
+          await MedicationEditController(repo, initial: saved).save();
+      expect(updated!.schedule,
+          const MedicationSchedule.afterMeal(delayMin: 30));
     });
   });
 }

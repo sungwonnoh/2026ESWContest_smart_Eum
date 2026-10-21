@@ -29,15 +29,15 @@ class MedicationListController extends AsyncController<List<Medication>> {
   }
 }
 
-enum MedicationStep { name, type, delay, times, days, refill, summary }
+enum MedicationStep { name, type, times, days, refill, summary }
 
-/// 복약 추가·수정: 약 이름 → 언제(식후/정해진 시각) → 식후 몇 분 또는 시각 → 며칠분 → 정기 처방 → 확인.
+/// 복약 추가·수정: 약 이름 → 언제(식후/정해진 시각) → (정해진 시각이면) 시각 → 며칠분 → 정기 처방 → 확인.
+/// 식후는 고르지 않고 항상 식후 [MedicationSchedule.afterMealDelayMin]분이다.
 class MedicationEditController extends ChangeNotifier {
   MedicationEditController(this._repository, {Medication? initial})
       : _initial = initial,
         _name = initial?.name ?? '',
         _type = initial?.schedule.type,
-        _delay = initial?.schedule.delayMin,
         _times = {...?initial?.schedule.times},
         _days = initial?.days,
         _refill = initial?.refillRequired;
@@ -60,7 +60,6 @@ class MedicationEditController extends ChangeNotifier {
 
   String _name;
   ScheduleType? _type;
-  int? _delay;
   final Set<String> _times;
   int? _days;
   bool? _refill;
@@ -76,7 +75,6 @@ class MedicationEditController extends ChangeNotifier {
 
   String get name => _name;
   ScheduleType? get type => _type;
-  int? get delay => _delay;
 
   /// 하루 순서로 정렬된 시각.
   List<String> get times => _times.toList()..sort();
@@ -88,7 +86,6 @@ class MedicationEditController extends ChangeNotifier {
   List<MedicationStep> get steps => [
         MedicationStep.name,
         MedicationStep.type,
-        if (_type != ScheduleType.fixed) MedicationStep.delay,
         if (_type == ScheduleType.fixed) MedicationStep.times,
         MedicationStep.days,
         MedicationStep.refill,
@@ -105,7 +102,6 @@ class MedicationEditController extends ChangeNotifier {
         MedicationStep.name =>
           _name.trim().isNotEmpty && _name.trim().length <= maxNameLength,
         MedicationStep.type => _type != null,
-        MedicationStep.delay => _delay != null,
         MedicationStep.times => _times.isNotEmpty,
         MedicationStep.days => _days != null,
         MedicationStep.refill => _refill != null,
@@ -119,11 +115,6 @@ class MedicationEditController extends ChangeNotifier {
 
   void setType(ScheduleType value) {
     _type = value;
-    notifyListeners();
-  }
-
-  void setDelay(int minutes) {
-    _delay = minutes;
     notifyListeners();
   }
 
@@ -171,7 +162,8 @@ class MedicationEditController extends ChangeNotifier {
 
   MedicationSchedule get schedule => _type == ScheduleType.fixed
       ? MedicationSchedule.fixed(times)
-      : MedicationSchedule.afterMeal(delayMin: _delay ?? 30);
+      : const MedicationSchedule.afterMeal(
+          delayMin: MedicationSchedule.afterMealDelayMin);
 
   Medication build() => Medication(
         id: _initial?.id ?? '',

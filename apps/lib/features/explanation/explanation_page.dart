@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/exit_app.dart';
 import '../../app/hestia_scope.dart';
 import '../../app/theme.dart';
 import '../../core/state/async_controller.dart';
@@ -66,7 +67,10 @@ class _ExplanationPageState extends State<ExplanationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('HESTIA 판단')),
+      appBar: AppBar(
+        title: const Text('HESTIA 판단'),
+        actions: const [ExitAppButton()],
+      ),
       body: AsyncStateView<ExplanationResult>(
         controller: _controller,
         emptyIcon: Icons.psychology_alt_rounded,
