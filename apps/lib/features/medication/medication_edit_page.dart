@@ -106,11 +106,7 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
     MedicationStep.name: ('무슨 약인가요?', '자주 드시는 약을 고르거나 직접 입력하세요.'),
     MedicationStep.type: (
       '언제 드세요?',
-      '끼니마다 식후에 드시면 "식후", 그 밖에는 "정해진 시각"을 골라주세요.',
-    ),
-    MedicationStep.delay: (
-      '식사 후 언제 드세요?',
-      '약 봉투에 적힌 대로 골라주세요. 끼니마다(하루 최대 세 번) 알려드려요.',
+      '끼니마다 식후에 드시면 "식후"(식후 30분), 그 밖에는 "정해진 시각"을 골라주세요.',
     ),
     MedicationStep.times: (
       '몇 시에 드세요?',
@@ -132,7 +128,7 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
               _ChoiceButton(
                 icon: MedicationLabels.typeIcon(ScheduleType.afterMeal),
                 label: ScheduleType.afterMeal.label,
-                caption: '감기약처럼 끼니마다',
+                caption: '끼니마다 식후 30분에 알려드려요',
                 selected: c.type == ScheduleType.afterMeal,
                 onTap: () => c.setType(ScheduleType.afterMeal),
               ),
@@ -143,17 +139,6 @@ class _MedicationEditPageState extends State<MedicationEditPage> {
                 selected: c.type == ScheduleType.fixed,
                 onTap: () => c.setType(ScheduleType.fixed),
               ),
-            ],
-          ),
-        MedicationStep.delay => _ChoiceWrap(
-            children: [
-              for (final minutes in MedicationSchedule.afterMealDelays)
-                _ChoiceButton(
-                  icon: MedicationLabels.delayIcon(minutes),
-                  label: MedicationSchedule.delayLabel(minutes),
-                  selected: c.delay == minutes,
-                  onTap: () => c.setDelay(minutes),
-                ),
             ],
           ),
         MedicationStep.times => _TimesStep(controller: c),
@@ -362,13 +347,10 @@ class _Summary extends StatelessWidget {
     final m = controller.build();
     final rows = [
       (MedicationStep.name, '약 이름', m.name),
-      (MedicationStep.type, '언제', m.schedule.type.label),
       if (m.schedule.type == ScheduleType.afterMeal)
-        (
-          MedicationStep.delay,
-          '식사 후',
-          '${MedicationSchedule.delayLabel(m.schedule.delayMin ?? 30)} · 끼니마다',
-        ),
+        (MedicationStep.type, '언제', m.schedule.label)
+      else
+        (MedicationStep.type, '언제', m.schedule.type.label),
       if (m.schedule.type == ScheduleType.fixed)
         (MedicationStep.times, '시각', m.schedule.sortedTimes.join(' · ')),
       (MedicationStep.days, '기간', '${m.days}일분'),

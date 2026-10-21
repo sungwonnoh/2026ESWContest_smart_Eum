@@ -259,9 +259,6 @@ abstract final class MedicationLabels {
         ScheduleType.fixed => Icons.schedule_rounded,
       };
 
-  static IconData delayIcon(int minutes) =>
-      minutes == 0 ? Icons.restaurant_rounded : Icons.timer_rounded;
-
   /// "HH:MM" → 시간대 아이콘 (새벽·아침 / 낮 / 저녁 / 밤).
   static IconData timeIcon(String time) {
     final hour = int.tryParse(time.split(':').first) ?? 0;
