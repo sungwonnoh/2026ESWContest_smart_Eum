@@ -469,14 +469,49 @@ class _StepHeader extends StatelessWidget {
   }
 }
 
+/// 선택 버튼 격자. 문구 길이와 상관없이 같은 크기로 맞춘다 —
+/// 한 줄에 같은 개수를 같은 너비로 두고, 줄 안에서는 가장 높은 버튼에 높이를 맞춘다.
 class _ChoiceWrap extends StatelessWidget {
   const _ChoiceWrap({required this.children});
 
   final List<Widget> children;
 
+  static const _gap = 12.0;
+  static const _minWidth = 150.0;
+
   @override
-  Widget build(BuildContext context) =>
-      Wrap(spacing: 12, runSpacing: 12, children: children);
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final fit =
+              ((constraints.maxWidth + _gap) / (_minWidth + _gap)).floor();
+          final columns = fit.clamp(1, children.length);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < children.length; i += columns)
+                Padding(
+                  padding: EdgeInsets.only(top: i == 0 ? 0 : _gap),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var j = i; j < i + columns; j++) ...[
+                          if (j > i) const SizedBox(width: _gap),
+                          // 마지막 줄이 덜 차도 너비는 다른 줄과 같다
+                          Expanded(
+                            child: j < children.length
+                                ? children[j]
+                                : const SizedBox.shrink(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      );
 }
 
 /// 큰 선택 버튼. 고른 것은 강조색과 체크 표시로 구분한다.
@@ -516,34 +551,34 @@ class _ChoiceButton extends StatelessWidget {
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(
-              minWidth: 150,
               minHeight: HestiaSizes.primaryButtonHeight + 8,
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (icon != null) ...[
                     Icon(icon, size: 28, color: fg),
                     const SizedBox(width: 10),
                   ],
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: fg,
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: fg,
+                          ),
                         ),
-                      ),
-                      if (caption != null)
-                        Text(caption!,
-                            style: TextStyle(fontSize: 14, color: fg)),
-                    ],
+                        if (caption != null)
+                          Text(caption!,
+                              style: TextStyle(fontSize: 14, color: fg)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Icon(

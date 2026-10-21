@@ -124,6 +124,12 @@ void main() {
     await _tap(tester, find.text('30일'));
     await _tap(tester, find.text('다음'));
 
+    // 문구 길이가 달라도 선택 버튼 크기는 같다
+    Size buttonSize(String label) => tester.getSize(find
+        .ancestor(of: find.text(label), matching: find.byType(InkWell))
+        .first);
+    expect(buttonSize('예'), buttonSize('아니요'));
+
     await _tap(tester, find.text('예'));
     await _tap(tester, find.text('다음'));
 
