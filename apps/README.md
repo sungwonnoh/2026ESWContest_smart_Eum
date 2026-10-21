@@ -14,6 +14,8 @@ Mock Data → HestiaRepository → Controller(ChangeNotifier) → Flutter UI
 - 판단(사용자 상태 추론)은 Context Engine이 한다. 앱은 받은 상태를 표시만 한다.
 - Widget은 HTTP/MQTT에 직접 접근하지 않는다. 서버가 정해지면 Repository 구현체만 교체한다.
 - 서버 주소는 `--dart-define=API_BASE_URL=...`로 주입한다 (Phase 2).
+- 앱 버전(설정 > 시스템 정보)은 `--dart-define=APP_VERSION=...`로 주입한다. IPK 버전(`atlas/appinfo.json`의 `version`)과 같은 값을 넣는다.
+  주입하지 않으면 `AppConfig.appVersion` 기본값이 보이므로, 릴리스 때 기본값과 `pubspec.yaml` 버전도 함께 올린다.
 
 ## 구조
 
