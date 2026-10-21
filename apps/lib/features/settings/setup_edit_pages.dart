@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/exit_app.dart';
 import '../../app/hestia_scope.dart';
 import '../../core/network/hestia_exception.dart';
 import '../../core/utils/display_labels.dart';
@@ -78,7 +79,10 @@ class _SetupEditScaffoldState extends State<_SetupEditScaffold> {
   Widget build(BuildContext context) {
     final canSave = widget.canSave?.call() ?? true;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: const [ExitAppButton()],
+      ),
       body: AsyncStateView<HomeSetup>(
         controller: _controller,
         builder: (context, _) => Column(

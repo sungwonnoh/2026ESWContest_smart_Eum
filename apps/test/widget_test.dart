@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hestia_flutter_test/app/app.dart';
@@ -95,6 +96,43 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(find.text('시작하기'), findsOneWidget);
+  });
+
+  testWidgets('나가기는 확인 후 앱을 닫는다 (SystemNavigator.pop)', (tester) async {
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        calls.add(call.method);
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    final repo = MockHestiaRepository(
+      latency: Duration.zero,
+      initialSetup: const HomeSetup(
+        rooms: [Room(id: 'living', name: '거실')],
+        devices: [],
+        preferences: UserPreferences(),
+      ),
+    );
+    await _boot(tester, repo);
+
+    // 취소하면 그대로 남는다
+    await _tap(tester, find.text('나가기'));
+    expect(find.text('홈 화면으로 나갈까요?'), findsOneWidget);
+    await _tap(tester, find.text('취소'));
+    expect(calls, isNot(contains('SystemNavigator.pop')));
+    expect(find.text('복약 알림 추가하기'), findsOneWidget);
+
+    // 하위 화면의 버튼도 같다
+    await _tap(tester, find.text('설정'));
+    await _tap(tester, find.text('시스템 정보'));
+    await _tap(tester, find.byTooltip('홈 화면으로 나가기'));
+    await _tap(tester, find.widgetWithText(FilledButton, '나가기'));
+    expect(calls, contains('SystemNavigator.pop'));
   });
 
   testWidgets('홈에서 복약 알림을 추가하면 홈 카드에 보인다', (tester) async {
