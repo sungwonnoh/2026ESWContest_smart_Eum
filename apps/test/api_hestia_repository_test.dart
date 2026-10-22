@@ -3,14 +3,14 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter/core/network/hestia_exception.dart';
-import 'package:hestia_flutter/core/utils/display_labels.dart';
-import 'package:hestia_flutter/models/context_state.dart';
-import 'package:hestia_flutter/models/device.dart';
-import 'package:hestia_flutter/models/notification_item.dart';
-import 'package:hestia_flutter/models/user_preferences.dart';
-import 'package:hestia_flutter/repositories/api_hestia_repository.dart';
-import 'package:hestia_flutter/services/api_client.dart';
+import 'package:hestia_flutter_test/core/network/hestia_exception.dart';
+import 'package:hestia_flutter_test/core/utils/display_labels.dart';
+import 'package:hestia_flutter_test/models/context_state.dart';
+import 'package:hestia_flutter_test/models/device.dart';
+import 'package:hestia_flutter_test/models/notification_item.dart';
+import 'package:hestia_flutter_test/models/user_preferences.dart';
+import 'package:hestia_flutter_test/repositories/api_hestia_repository.dart';
+import 'package:hestia_flutter_test/services/api_client.dart';
 
 import 'support/fake_api.dart';
 
