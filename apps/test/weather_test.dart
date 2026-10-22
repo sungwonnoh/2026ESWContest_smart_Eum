@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter/core/utils/display_labels.dart';
-import 'package:hestia_flutter/models/weather.dart';
+import 'package:hestia_flutter_test/core/utils/display_labels.dart';
+import 'package:hestia_flutter_test/models/weather.dart';
 
 Map<String, dynamic> _json({Object? warnings = const [], bool stale = false}) =>
     {
