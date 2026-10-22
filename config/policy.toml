@@ -36,9 +36,9 @@ on_exit_w = 150
 min_hold_sec = 15
 
 [power.microwave]               # 짧게 쓰므로 hold 를 줄인다
-standby_max_w = 3
+standby_max_w = 5
 on_min_w = 500
-on_exit_w = 300
+on_exit_w = 10
 min_hold_sec = 10
 
 
