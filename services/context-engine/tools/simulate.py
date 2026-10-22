@@ -122,6 +122,7 @@ USAGE_CLOCK = """사용법: clock [시각|간격]
   시계는 되돌릴 수 없다. 22:00 에서 clock 02:00 은 다음날 02:00 이다.
   점프 전에 idle 을 쳐라 — 수면 장면만 예외다."""
 
+RECONNECT_DELAY_SEC = 5.0   # 끊긴 뒤 재연결 간격
 
 def _as_bool(token: str) -> bool | None:
     """true/false 를 읽는다. on/off, 1/0 도 받는다 — 손이 기억하는 말들이다."""
@@ -198,7 +199,9 @@ class Simulator:
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
         )
         self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect 
         self._client.on_message = self._on_message
+        self._connected = False
 
     # ------------------------------------------------------------ 가상 시계
 
@@ -230,8 +233,22 @@ class Simulator:
             f"브로커 {self._host}:{self._port} — help 로 명령 목록"
             f"\npresence 하트비트 {self._hb_period:g}초 (heartbeat off 로 끔)"
         )
+        next_retry = 0.0
         while self._running:
+            if not self._connected and time.monotonic() >= next_retry:
+                # loop() 는 자동 재연결을 하지 않는다. 직접 걸어야 한다.
+                next_retry = time.monotonic() + RECONNECT_DELAY_SEC
+                try:
+                    self._client.reconnect()
+                except OSError as exc:
+                    print(f"재연결 실패: {exc}")
+
             self._client.loop(timeout=0.1)
+
+            if not self._connected:
+                # 소켓이 없으면 loop() 가 즉시 돌아와 공회전한다.
+                time.sleep(0.1)
+
             self._apply_due()
             self._run_heartbeat()
             self._run_script()
@@ -248,6 +265,9 @@ class Simulator:
         if reason_code != 0:
             print(f"연결 거부 rc={reason_code}")
             return
+
+        self._connected = True
+        
         client.subscribe(CLOCK_TOPIC, qos=1)
         client.subscribe("hestia/device/+/cmd", qos=1)
         if self._watch:
@@ -259,6 +279,13 @@ class Simulator:
         for vid in self.devices:
             self._publish_state(vid)
         print(f"연결됨 — 가전 {len(self.devices)}대 상태 발행")
+
+
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
+        self._connected = False
+        if self._running:
+            print(f"\n연결 끊김 rc={reason_code} — 재연결 시도")
+
 
     def _on_message(self, client, userdata, msg) -> None:
         topic = msg.topic
@@ -762,11 +789,13 @@ class Simulator:
             return
 
         self._offset += target - now
-        self._client.publish(
+        info = self._client.publish(
             CLOCK_TOPIC,
             json.dumps({"offset": self._offset, "at": time.time()}),
             qos=1, retain=True,
         )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            print(f"  시계 발행 실패 rc={info.rc} — 브로커에 안 닿았다")
         print(
             f"  {datetime.fromtimestamp(now):%H:%M:%S}"
             f" → {datetime.fromtimestamp(target):%H:%M:%S}"
