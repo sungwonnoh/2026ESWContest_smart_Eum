@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter_test/app/app.dart';
-import 'package:hestia_flutter_test/features/medication/medication_controllers.dart';
-import 'package:hestia_flutter_test/models/home_setup.dart';
-import 'package:hestia_flutter_test/models/room.dart';
-import 'package:hestia_flutter_test/models/user_preferences.dart';
-import 'package:hestia_flutter_test/repositories/mock_hestia_repository.dart';
+import 'package:hestia_flutter/app/app.dart';
+import 'package:hestia_flutter/features/medication/medication_controllers.dart';
+import 'package:hestia_flutter/models/home_setup.dart';
+import 'package:hestia_flutter/models/room.dart';
+import 'package:hestia_flutter/models/user_preferences.dart';
+import 'package:hestia_flutter/repositories/mock_hestia_repository.dart';
 
 Future<void> _boot(WidgetTester tester, MockHestiaRepository repo) async {
   await tester.pumpWidget(HestiaApp(repository: repo));

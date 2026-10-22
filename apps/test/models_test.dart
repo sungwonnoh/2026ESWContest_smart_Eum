@@ -1,13 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter_test/core/utils/display_labels.dart';
-import 'package:hestia_flutter_test/models/context_state.dart';
-import 'package:hestia_flutter_test/models/device.dart';
-import 'package:hestia_flutter_test/models/explanation.dart';
-import 'package:hestia_flutter_test/models/home_setup.dart';
-import 'package:hestia_flutter_test/models/notification_item.dart';
-import 'package:hestia_flutter_test/models/room.dart';
-import 'package:hestia_flutter_test/models/user_preferences.dart';
+import 'package:hestia_flutter/core/utils/display_labels.dart';
+import 'package:hestia_flutter/models/context_state.dart';
+import 'package:hestia_flutter/models/device.dart';
+import 'package:hestia_flutter/models/explanation.dart';
+import 'package:hestia_flutter/models/home_setup.dart';
+import 'package:hestia_flutter/models/notification_item.dart';
+import 'package:hestia_flutter/models/room.dart';
+import 'package:hestia_flutter/models/user_preferences.dart';
 
 void main() {
   group('Device', () {
