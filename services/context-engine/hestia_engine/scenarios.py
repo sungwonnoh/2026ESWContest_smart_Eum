@@ -1214,7 +1214,9 @@ class ScenarioRunner:
 
         level = int(self._nl_value("brightness", 15))
         if self._controller.set(
-            vid, power="ON", brightness=level, reason="NIGHT_LIGHT"
+            vid, power="ON", brightness=level, reason="NIGHT_LIGHT",
+            # 새벽에 확 켜지면 눈이 부시다. 0 이면 즉시 켜진다.
+            transition_ms=int(self._nl_value("transition_ms", 0)) or None,
         ) is None:
             return
 
@@ -1248,7 +1250,10 @@ class ScenarioRunner:
         if presence is not None and presence.areas.get(area):
             return [("night-light", now + timeout)]
 
-        self._controller.set(vid, power="OFF", reason="NIGHT_LIGHT")
+        self._controller.set(
+            vid, power="OFF", reason="NIGHT_LIGHT",
+            transition_ms=int(self._nl_value("transition_ms", 0)) or None,
+        )
         self._nl = None
         log.info("야간 조명 소등 %s", vid)
         return []
@@ -1337,6 +1342,8 @@ class ScenarioRunner:
 
         self._controller.set(
             vid, power="ON", brightness=want, reason="DAY_LIGHT", priority="low",
+            # 뚝 끊기면 조명이 고장난 것처럼 읽힌다. 0 이면 즉시 바뀐다.
+            transition_ms=int(self._dl_value("transition_ms", 0)) or None,
         )
         self._dl_at = now
         log.info("주간 조명 %s %s → %s%% (lux=%s)", vid, cur, want, round(lux))

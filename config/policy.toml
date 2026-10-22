@@ -461,6 +461,7 @@ retry_sec = 1800
 
 [scenarios.night_light]
 brightness = 15          # 0~100 정수
+transition_ms = 2000
 timeout_sec = 1800
 
 [scenarios.day_light]
@@ -468,6 +469,7 @@ floor_lux = 300            # 실측 전 임시값
 ceiling_lux = 600          # 데드밴드. 조명 한 단계 기여분보다 넓게
 step = 20
 min_adjust_interval_sec = 5
+transition_ms = 3000
 manual_override_sec = 7200
 day_start_hour = 8
 day_end_hour = 18
