@@ -44,6 +44,7 @@ log = logging.getLogger(__name__)
 
 SIM_CLOCK_TOPIC = "hestia/sim/clock"
 LOOP_TIMEOUT_SEC = 0.5
+RECONNECT_DELAY_SEC = 5.0   # 끊긴 뒤 재연결 간격
 
 
 class Runner:
@@ -63,6 +64,7 @@ class Runner:
         self._port = port
         self._clock = clock
         self._running = False
+        self._connected = False
         # Speed 한 칸이 몇 초인지는 Tasmota 문서에서 확인하지 못했다.
         # 플러그가 오면 콘솔에서 재어 맞춘다.
         self._speed_step = speed_step_sec
@@ -83,9 +85,26 @@ class Runner:
 
     def run(self) -> None:
         self.start()
+        next_retry = 0.0
         while self._running:
             try:
+                if not self._connected and time.monotonic() >= next_retry:
+                    # loop() 는 자동 재연결을 하지 않는다. 직접 걸어야 한다.
+                    next_retry = time.monotonic() + RECONNECT_DELAY_SEC
+                    try:
+                        self.client.reconnect()
+                        log.info("재연결 시도")
+                    except OSError as exc:
+                        log.warning(
+                            "재연결 실패 (%s) — %.0f초 뒤 재시도",
+                            exc, RECONNECT_DELAY_SEC,
+                        )
+
                 self.client.loop(timeout=LOOP_TIMEOUT_SEC)
+
+                if not self._connected:
+                    # 소켓이 없으면 loop() 가 즉시 돌아와 공회전한다.
+                    time.sleep(LOOP_TIMEOUT_SEC)
             except Exception:                         # noqa: BLE001
                 # 한 번의 예외로 브리지가 멈추면 안 된다
                 log.exception("루프 예외 — 계속한다")
@@ -95,6 +114,7 @@ class Runner:
         if not self._running:
             return
         self._running = False
+        self._connected = False
         log.info("종료")
         try:
             self.client.disconnect()
@@ -118,6 +138,9 @@ class Runner:
         if reason_code != 0:
             log.warning("연결 거부 rc=%s", reason_code)
             return
+
+        self._connected = True
+        
         for topic in self.service.subscriptions():
             client.subscribe(topic, qos=1)
         for topic in self.service.device_subscriptions():
@@ -129,8 +152,9 @@ class Runner:
         )
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
+        self._connected = False
         if self._running:
-            log.warning("연결 끊김 rc=%s — 재연결 대기", reason_code)
+            log.warning("연결 끊김 rc=%s — 재연결 시도", reason_code)
 
     def _on_message(self, client, userdata, msg) -> None:
         """가전 토픽을 먼저 가린다 — 센서 분기가 모르는 토픽을 바로

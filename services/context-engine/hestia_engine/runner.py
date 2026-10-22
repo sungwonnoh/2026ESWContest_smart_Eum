@@ -57,7 +57,7 @@ SUBSCRIBE = (
 )
 
 LOOP_TIMEOUT_SEC = 0.5      # 소켓 대기. 이만큼마다 타이머를 확인
-
+RECONNECT_DELAY_SEC = 5.0   # 끊긴 뒤 재연결 간격
 
 class Runner:
     """브로커에 붙어 엔진을 돌린다."""
@@ -73,6 +73,7 @@ class Runner:
         self._host = host
         self._port = port
         self._running = False
+        self._connected = False
 
         # 시연에서 시계를 점프시킨다 (hestia/sim/clock).
         # 오프셋 0 이면 RealClock 과 동일하게 동작한다.
@@ -115,9 +116,31 @@ class Runner:
     def run(self) -> None:
         """메시지와 타이머를 번갈아 처리한다."""
         self.start()
+        next_retry = 0.0
         while self._running:
             try:
+                if not self._connected and time.monotonic() >= next_retry:
+                    # loop() 는 자동 재연결을 하지 않는다. reconnect_delay_set
+                    # 은 loop_forever()/loop_start() 가 쓰는 설정이라 여기서는
+                    # 효과가 없다. 직접 걸어야 한다.
+                    next_retry = time.monotonic() + RECONNECT_DELAY_SEC
+                    try:
+                        self.client.reconnect()
+                        log.info("재연결 시도")
+                    except OSError as exc:
+                        log.warning(
+                            "재연결 실패 (%s) — %.0f초 뒤 재시도",
+                            exc, RECONNECT_DELAY_SEC,
+                        )
+
                 self.client.loop(timeout=LOOP_TIMEOUT_SEC)
+
+                if not self._connected:
+                    # 소켓이 없으면 loop() 가 select 를 건너뛰고 즉시 돌아온다
+                    # (측정 1.4µs). 그대로 두면 while 이 초당 70만 바퀴 돌며
+                    # 코어 하나를 태운다. select 가 못 해주는 대기를 넣는다.
+                    time.sleep(LOOP_TIMEOUT_SEC)
+
                 self.sched.run_due()
             except KeyboardInterrupt:
                 self.stop()
@@ -131,6 +154,7 @@ class Runner:
         if not self._running:
             return
         self._running = False
+        self._connected = False
         log.info("종료 — %s", self.engine.summary())
         try:
             self._publish_status(online=False)
@@ -170,6 +194,8 @@ class Runner:
             log.warning("연결 거부 rc=%s", reason_code)
             return
 
+        self._connected = True
+
         for topic in SUBSCRIBE:     # 구독, RPi5 구독 목록 9개에 대해 구독
             client.subscribe(topic, qos=1)
         client.subscribe(SIM_CLOCK_TOPIC, qos=1)
@@ -182,8 +208,9 @@ class Runner:
         self.engine.publish_snapshot()          # hestia/context/* 여섯 개를 전량 적재 (UNKNOWN 발행도 적재)
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
+        self._connected = False
         if self._running:
-            log.warning("연결 끊김 rc=%s — 재연결 대기", reason_code)
+            log.warning("연결 끊김 rc=%s — 재연결 시도", reason_code)
 
     def _on_message(self, client, userdata, msg) -> None:
         """retain 플래그를 그대로 넘긴다."""
