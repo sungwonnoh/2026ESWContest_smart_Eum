@@ -212,7 +212,7 @@ note = "배너 채널. remote_input 은 수면 판단의 핵심 신호"
 id = "vd-02"
 device_type = "smart_light"
 area = "living"
-source = "mock"
+source = "tasmota"
 channel = true
 note = "비언어 신호 채널"
 
