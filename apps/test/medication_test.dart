@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter_test/core/utils/display_labels.dart';
-import 'package:hestia_flutter_test/features/medication/medication_controllers.dart';
-import 'package:hestia_flutter_test/models/medication.dart';
-import 'package:hestia_flutter_test/repositories/mock_hestia_repository.dart';
+import 'package:hestia_flutter/core/utils/display_labels.dart';
+import 'package:hestia_flutter/features/medication/medication_controllers.dart';
+import 'package:hestia_flutter/models/medication.dart';
+import 'package:hestia_flutter/repositories/mock_hestia_repository.dart';
 
 void main() {
   final today = DateTime(2026, 10, 9);
