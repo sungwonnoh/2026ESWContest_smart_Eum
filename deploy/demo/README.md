@@ -23,21 +23,48 @@ p2 모델 하나만 넣은 뒤** 시작한다.
 
 ## 순서
 
+WSL 에서 한 번에 (원격은 ATLAS OS `/bin/sh`, 스크립트는 ssh 표준 입력으로 보낸다):
+
+```sh
+cd deploy/demo
+DRY_RUN=1 ./run_all.sh     # 계획만 — 지울 retained · 옮길 파일 · 백업 경로 · 끌 서비스
+./run_all.sh               # 실제 실행. 하나라도 실패하면 그 자리에서 멈춘다
+```
+
+`run_all.sh` 가 하는 순서:
+
 ```text
-RPi5  ./rpi5_reset.sh      서비스 정지 → retained 전부 삭제 → DB·t0 로그 백업
-RPi4  ./rpi4_prepare.sh    실측 끄기 → p2 모델 발행 → 끼니 피크 확인 (11:00 · 16:45)
-RPi5  ./rpi5_start.sh      모델 확인 → sim/clock 정리 → 엔진 → Backend
-앱    최초 설정             공간 6개 · 가전 (demo.toml 과 같은 공간에만 둘 수 있다)
-앱    복약 등록             식후 약은 여기서 — 등록 시각 전에 끝난 오늘 식사는 건너뛴다
-RPi5  ./check.sh           모델 91일·피크 2개 / 복약 목록 / sim/clock 없음 / API 200
+RPi5 root@172.20.10.4  rpi5_reset.sh    계획 출력 → 엔진·Backend 정지 → hestia/# retained 삭제 → DB·t0 로그 백업
+RPi4 root@172.20.10.2  rpi4_prepare.sh  실측 끄기 → p2 로그 확인 → p2 모델 발행 → 끼니 피크 확인 (11:00 · 16:45)
+RPi5                   rpi5_start.sh    브로커·모델 확인 → sim/clock 정리 → 엔진 재연결 검사 → 엔진 → Backend
+(앱)                                    최초 설정 · 복약 등록 — 터미널이면 Enter 를 기다린다 (SKIP_PAUSE=1 로 건너뜀)
+RPi5                   check.sh         컨테이너 · 엔진 CPU · 모델 · 복약 · sim/clock · API
 ```
 
-경로·이름이 다르면 환경변수로 넘긴다.
+- MQTT CLI 는 RPi5 의 `mosquitto` 컨테이너 안의 것을, JSON 해석은 Backend 컨테이너(RPi5)·학습 이미지(RPi4)의
+  python 을 쓴다. 호스트에 bash · python · mosquitto 클라이언트가 없어도 된다.
+- 이름·경로가 다르면 로컬 환경변수로 넘긴다. `run_all.sh` 가 원격 스크립트 앞에 붙여 보낸다.
 
-```bash
-BACKEND_DB=/data/hestia.db BACKEND_NAME=hestia-api ./rpi5_reset.sh
-BROKER=rpi5.local APP_DIR=/data/hestia-learning ./rpi4_prepare.sh
+```sh
+ENGINE_NAME=ce BACKEND_NAME=api BACKEND_DB=/data/hestia.db ./run_all.sh
+RPI5=root@172.20.10.5 RPI4=root@172.20.10.3 ./run_all.sh
 ```
+
+하나씩 돌릴 때:
+
+```sh
+ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@172.20.10.4 sh -s < rpi5_reset.sh
+```
+
+### 엔진 재연결 버그 대비
+
+현재 엔진(`runner.run`)은 기동 때 브로커에 못 붙으면 다시 붙지 않고 CPU 100% 로 돈다. `rpi5_start.sh` 는
+
+1. 엔진 이미지의 `Runner` 소스에 `reconnect(` 가 있는지 본다 — 없으면 경고 (`STRICT_ENGINE_FIX=1` 이면 중단)
+2. 브로커가 연결을 받는 것을 확인한 뒤에만 엔진을 켠다
+3. `CONNECT_WAIT`(기본 20)초 안에 엔진 로그에 `연결됨` 이 없으면 엔진을 다시 멈추고 중단한다
+
+수정된 이미지가 아니면 **시연 중 mosquitto 를 재시작하지 않는다.** 했다면 엔진도 재시작한다.
 
 ## 시연 중 지킬 것
 
@@ -61,15 +88,15 @@ BROKER=rpi5.local APP_DIR=/data/hestia-learning ./rpi4_prepare.sh
 retained 는 브로커가 디스크에 저장해야 RPi5 재부팅 뒤에도 남는다. `/etc/mosquitto/mosquitto.conf`
 (또는 `conf.d/`)에 `persistence true` 가 없으면 RPi5 를 켤 때마다 `rpi4_prepare.sh` 의 모델 발행을 다시 해야 한다.
 
-```bash
-grep -rn persistence /etc/mosquitto/
+```sh
+docker exec mosquitto sh -c 'grep -rn persistence /mosquitto/config/'
 ```
 
 ## 시연이 끝나면
 
-```bash
+```sh
 # RPi5 — 시연 상태 정리
-./rpi5_reset.sh
-# RPi4 — 실측 다시 켜기 (모델은 실데이터가 쌓여 학습될 때까지 없다 = 식후 알림 없음)
-sudo systemctl enable --now hestia-learning.timer hestia-t0-logger
+ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@172.20.10.4 sh -s < rpi5_reset.sh
+# RPi4 — rpi4_prepare.sh 가 마지막에 출력한 "다시 켤 것" 을 실행한다
+# (모델은 실데이터가 쌓여 학습될 때까지 없다 = 식후 알림 없음)
 ```
