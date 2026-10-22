@@ -261,6 +261,9 @@ class ScenarioRunner:
         if since is None:
             return []                       # 움직이는 중
 
+        if self._awake_floor is not None and self._awake_floor > since:
+            since = self._awake_floor
+
         # 떠볼 수단이 그 구역에 있나
         has_channel = self._tv_on(area) or self._light_in(area) is not None
         limit = float(self._sleep_value(
