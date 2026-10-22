@@ -22,6 +22,20 @@ Future<void> _tap(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+/// 홈은 ListView 라서 화면 밖(뷰포트 + 캐시 영역 밖) 항목은 아직 만들어지지 않는다.
+/// 만들어지지 않은 위젯은 find 가 못 찾아 ensureVisible 이 "No element" 로 실패하므로,
+/// 찾을 때까지 홈 목록을 내린다.
+Future<void> _scrollHomeTo(WidgetTester tester, Finder finder) async {
+  await tester.scrollUntilVisible(
+    finder,
+    200,
+    scrollable: find
+        .descendant(of: find.byType(ListView), matching: find.byType(Scrollable))
+        .first,
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('설정이 없으면 Splash 다음 Welcome 화면을 보여준다', (tester) async {
     await _boot(tester, MockHestiaRepository(latency: Duration.zero));
@@ -152,6 +166,9 @@ void main() {
         ),
       );
       await _boot(tester, repo);
+      // 800x480·360x740 은 기본 테스트 화면(800x600)보다 홈 목록이 짧게 보여
+      // 복약 카드가 아직 만들어지지 않았다
+      await _scrollHomeTo(tester, find.text('복약 알림 추가하기'));
       await _tap(tester, find.text('복약 알림 추가하기'));
       expect(find.text('무슨 약인가요?'), findsOneWidget);
 
