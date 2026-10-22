@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hestia_flutter_test/app/notification_center.dart';
-import 'package:hestia_flutter_test/core/network/hestia_exception.dart';
-import 'package:hestia_flutter_test/core/state/async_controller.dart';
-import 'package:hestia_flutter_test/features/onboarding/onboarding_controller.dart';
-import 'package:hestia_flutter_test/models/device.dart';
-import 'package:hestia_flutter_test/repositories/mock_hestia_repository.dart';
+import 'package:hestia_flutter/app/notification_center.dart';
+import 'package:hestia_flutter/core/network/hestia_exception.dart';
+import 'package:hestia_flutter/core/state/async_controller.dart';
+import 'package:hestia_flutter/features/onboarding/onboarding_controller.dart';
+import 'package:hestia_flutter/models/device.dart';
+import 'package:hestia_flutter/repositories/mock_hestia_repository.dart';
 
 MockHestiaRepository newRepo() => MockHestiaRepository(latency: Duration.zero);
 

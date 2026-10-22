@@ -135,24 +135,40 @@ fi
 # ------------------------------------------------------------------ 2) 시작
 
 echo "[4/4] 서비스 시작"
-since=$(date +%s)
+
+# 이번 실행 이전에 쌓인 로그의 줄 수
+before_lines=$(docker logs "$ENGINE_NAME" 2>&1 | wc -l | tr -d ' ')
+
 start_service "$ENGINE_NAME"
 
 i=0
 connected=0
+
 while [ "$i" -lt "$CONNECT_WAIT" ]; do
-    if engine_logs_since "$since" | grep -q "연결됨"; then connected=1; break; fi
+    running=$(docker inspect -f '{{.State.Running}}' "$ENGINE_NAME" 2>/dev/null || echo false)
+
+    if [ "$running" != "true" ]; then
+        die "엔진이 실행 중 종료됐다. docker logs $ENGINE_NAME 확인"
+    fi
+
+    # 이번 실행 이후 추가된 로그만 확인
+    if docker logs "$ENGINE_NAME" 2>&1 |
+       tail -n +"$((before_lines + 1))" |
+       grep '연결됨' >/dev/null; then
+        connected=1
+        break
+    fi
+
     sleep 1
     i=$((i + 1))
 done
+
 if [ "$connected" -ne 1 ]; then
     stop_service "$ENGINE_NAME"
-    die "엔진이 ${CONNECT_WAIT}초 안에 브로커에 붙지 않았다 — CPU 100% 루프를 막으려고 다시 멈췄다. 로그: docker logs $ENGINE_NAME"
+    die "엔진이 ${CONNECT_WAIT}초 안에 브로커에 연결되지 않았다"
 fi
+
 echo "  엔진 연결 확인 (${i}초)"
-if has_container "$ENGINE_NAME"; then
-    echo "  엔진 CPU: $(docker stats --no-stream --format '{{.CPUPerc}}' "$ENGINE_NAME" 2>/dev/null || echo '?')"
-fi
 
 start_service "$BACKEND_NAME"
 

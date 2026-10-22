@@ -226,10 +226,14 @@ class _ContextSection extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        Text(
-                          'HESTIA 판단 과정 보기',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: theme.colorScheme.primary,
+                        Flexible(
+                          child: Text(
+                            'HESTIA 판단 과정 보기',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
                           ),
                         ),
                         Icon(
@@ -289,8 +293,12 @@ class _ContextChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 8,
+      ),
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
@@ -300,17 +308,19 @@ class _ContextChip extends StatelessWidget {
         children: [
           Icon(ContextLabels.iconOf(state), size: 20),
           const SizedBox(width: 6),
-          Text(
-            '${ContextLabels.name(state.name)} · '
-            '${ContextLabels.describe(state)}',
-            style: const TextStyle(fontSize: 16),
+          Flexible(
+            child: Text(
+              '${ContextLabels.name(state.name)} · '
+              '${ContextLabels.describe(state)}',
+              style: const TextStyle(fontSize: 16),
+              softWrap: true,
+            ),
           ),
         ],
       ),
     );
   }
 }
-
 /// 복약 카드. 등록 전에는 [추가하기]만, 등록 후에는 약 목록과 남은 기간.
 /// 바깥 날씨. RPi4가 기상청에서 받아 온 값을 보여주기만 한다.
 class _WeatherSection extends StatelessWidget {
