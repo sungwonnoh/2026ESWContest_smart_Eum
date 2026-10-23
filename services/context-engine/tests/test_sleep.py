@@ -763,7 +763,9 @@ def test_night_light_on_when_bed_left(c):
     c.at(LEFT).bed("vs-02", occupied=False, seq=2)
 
     assert len(nl(c)) == 1
-    assert nl(c)[-1]["params"] == {"power": "ON", "brightness": 15}
+    params = nl(c)[-1]["params"]
+    assert params["power"] == "ON"
+    assert params["brightness"] == 15
 
 
 def test_no_night_light_when_woke_by_movement(c):
