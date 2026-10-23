@@ -73,6 +73,8 @@ class Controller:
         self._world = world
         self._publish = publish
 
+        self._settled: set[str] = set()
+
         self._last: dict[str, SentCommand] = {}    # target → 마지막 명령
         self._seq = 0
 
@@ -133,6 +135,7 @@ class Controller:
             reason=reason,
             priority=priority,
         )
+        self._settled.discard(target)
         log.info("제어 %s %s %s %s (%s)", cmd_id, target, action, body, reason)
         return cmd_id
 
@@ -168,6 +171,7 @@ class Controller:
         쪽에서 이것을 불러 기록을 지워야 유예가 한 번으로 끝난다.
         """
         self._last.pop(target, None)
+        self._settled.discard(target)
 
     def reverted(self, target: str) -> bool:
         """사용자가 명령을 되돌렸는가.
@@ -183,14 +187,29 @@ class Controller:
             return False                    # 아직 실행 전의 보고다
 
         if cmd.action in EMPTY_PARAM_ACTIONS:
-            return self._action_reverted(target, cmd)
+            differs = self._action_reverted(target, cmd)
+        else:
+            differs = any(
+                self._key_reverted(st, key, want)
+                for key, want in cmd.params.items()
+                if key != TRANSITION_KEY
+            )
 
-        for key, want in cmd.params.items():
-            if key == TRANSITION_KEY:
-                continue
-            if self._key_reverted(st, key, want):
-                return True
-        return False
+        if target in self._settled:
+            return differs              # 이미 따라온 적이 있다. 어긋나면 되돌림이다
+
+        if not differs:
+            self._settled.add(target)   # 따라왔다. 이제부터 어긋나면 되돌림이다
+            return False
+
+        settle = float(self._config.value(
+            "control", "revert_settle_sec", default=0.5
+        ))
+        if st.updated_at - cmd.sent_at <= settle:
+            return False
+
+        self._settled.add(target)       # 기다리기를 그만둔다
+        return True
 
     def devices_of_type(
         self, device_type: str, area: str | None = None
