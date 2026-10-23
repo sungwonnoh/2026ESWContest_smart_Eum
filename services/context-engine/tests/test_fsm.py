@@ -10,8 +10,7 @@ from hestia_engine.fsm import FileT0Log, MemoryT0Log, T0Entry, T0Log
 from hestia_engine.messages import parse
 from hestia_engine.timers import Scheduler
 from hestia_engine.world import WorldState
-
-from test_activity import HOME, POLICY, MORNING, NIGHT
+from test_activity import HOME, POLICY, MORNING, NIGHT, SEATED, MOVING
 
 
 class Ctx:
@@ -45,13 +44,18 @@ class Ctx:
     def tick(self):
         return self.engine.recompute()
 
-    def presence(self, vid: str, present: bool, energy: int = 50):
+    def presence(
+        self, vid: str, present: bool, energy: int = 50,
+        *, spread: int | None = None,
+    ):
+        if spread is None:
+            spread = (SEATED if energy <= 10 else MOVING) if present else 0
         return self.feed(f"hestia/sensor/{vid}/state", {
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
-            "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
-            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
+            "target": ("STATIC" if spread < 40 else "BOTH") if present else "NONE",
+            "dist_spread_cm": spread if present else 0,
         })
 
     def bed(self, vid: str, occupied: bool):
@@ -150,7 +154,7 @@ def test_t0_survives_prep_to_eating(c):
     t0 = c.meal.t0
 
     c.at(MORNING + 1000).power("vs-06", 3, "STANDBY")
-    c.at(MORNING + 1300).presence("vs-04", True, energy=12)
+    c.at(MORNING + 1300).presence("vs-04", True, spread=SEATED)
     assert c.engine.activity.state == "EATING"
     assert c.meal.t0 == t0
 
@@ -260,7 +264,7 @@ def test_eat_t0_recorded(c):
     c.presence("vs-04", True)
     c.at(MORNING + 100).power("vs-06", 1180, "ON")
     c.at(MORNING + 1000).power("vs-06", 3, "STANDBY")
-    c.at(MORNING + 1300).presence("vs-04", True, energy=12)   # EATING
+    c.at(MORNING + 1300).presence("vs-04", True, spread=SEATED)   # EATING
     c.at(MORNING + 1400).presence("vs-04", False)             # 주방 이탈
     c.at(MORNING + 2100).tick()                               # grace 600 초과
 
@@ -391,7 +395,7 @@ def test_t0_is_cooking_start_even_when_opened_as_eating(c):
     c.presence("vs-04", True)                       # 주방 진입
     c.at(MORNING + 100).power("vs-06", 1180, "ON")  # 조리 시작
     c.at(MORNING + 110).power("vs-06", 3, "STANDBY")  # 10초 만에 종료
-    c.at(MORNING + 400).presence("vs-04", True, energy=12)
+    c.at(MORNING + 400).presence("vs-04", True, spread=SEATED)
 
     assert c.engine.activity.state == "EATING"
     assert c.meal.t0 == MORNING + 100               # 주방 진입(MORNING)이 아니다
