@@ -117,7 +117,7 @@ id = "vs-08"
 type = "presence"
 area = "bedroom"
 roles = ["SLEEP"]
-source = "mock"
+source = "esp32"
 node = "esp32-1"
 note = "침대 mmWave — energy 로 수면/각성 구분"
 
@@ -265,7 +265,7 @@ note = "cycle_completed 후 vs-13 으로 수거 확인"
 [[devices]]
 id = "vd-09"
 device_type = "smart_light"
-area = "bedroom"
+area = "tasmota"
 source = "mock"
 channel = true
 
