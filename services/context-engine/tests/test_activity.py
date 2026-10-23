@@ -141,6 +141,8 @@ area = "bedroom"
 POLICY = (Path(__file__).parents[3] / "config" / "policy.toml").read_text(encoding="utf-8")
 
 # 2026-09-25 KST 기준
+SEATED = 5       # 앉음 — settled=True, target=STATIC
+MOVING = 90      # 걷기 — settled=False, target=BOTH
 MORNING = 1790296800.0      # 09:40
 NIGHT = 1790344800.0        # 23:00
 NOON = 1790305200.0         # 12:00
@@ -175,13 +177,18 @@ class Ctx:
 
     # ---- 헬퍼
 
-    def presence(self, vid: str, present: bool, energy: int = 50):
+    def presence(
+        self, vid: str, present: bool, energy: int = 50,
+        *, spread: int | None = None,
+    ):
+        if spread is None:
+            spread = (SEATED if energy <= 10 else MOVING) if present else 0
         return self.feed(f"hestia/sensor/{vid}/state", {
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
-                        "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
-            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
+            "target": ("STATIC" if spread < 40 else "BOTH") if present else "NONE",
+            "dist_spread_cm": spread if present else 0,
         })
 
     def bed(self, vid: str, occupied: bool):
@@ -342,7 +349,7 @@ def test_eating_after_cooking_stops(c):
     c.presence("vs-04", True)
     c.power("vs-06", 1180, state="ON")
     c.at(MORNING + 900).power("vs-06", 3, state="STANDBY")
-    c.at(MORNING + 1200).presence("vs-04", True, energy=12)
+    c.at(MORNING + 1200).presence("vs-04", True, spread=SEATED)
     assert c.a.state == "EATING"
 
 
@@ -358,7 +365,8 @@ def test_eating_needs_gap(c):
 def test_eating_without_cooking(c):
     """조리하지 않는 끼니도 잡힌다. 조리 종료는 관문이 아니다."""
     c.presence("vs-04", True)
-    c.at(MORNING + 400).presence("vs-04", True, energy=5)
+    c.fridge_open()
+    c.at(MORNING + 400).presence("vs-04", True, spread=SEATED)
     assert c.a.state == "EATING"
 
 
@@ -367,10 +375,11 @@ def test_stale_cooking_is_not_evidence(c):
     c.presence("vs-04", True)
     c.power("vs-06", 1180, state="ON")
     c.at(MORNING + 100).power("vs-06", 3, state="STANDBY")
-    c.at(MORNING + 100 + 5000).presence("vs-04", True, energy=5)
+    c.at(MORNING + 100 + 5000).presence("vs-04", True, spread=SEATED)
     assert c.a.factors["cooking_off_sec"] > 3600
-    # 그래도 dwell + settled 로 EATING 은 선다
-    assert c.a.state == "EATING"
+    # 증거가 없으면 끼니가 아니다. 체류와 착석만으로 EATING 을 세우면
+    # 식탁에 앉아 신문 보는 것도 식사가 된다.
+    assert c.a.state != "EATING"
 
 
 def test_dishes_is_not_eating(c):
@@ -407,7 +416,7 @@ def test_fridge_boosts_eating(c):
     c.power("vs-06", 1180, state="ON")
     c.at(MORNING + 900).power("vs-06", 3, state="STANDBY")
     c.at(MORNING + 1000).fridge_open()
-    c.at(MORNING + 1200).presence("vs-04", True, energy=12)
+    c.at(MORNING + 1200).presence("vs-04", True, spread=SEATED)
     assert c.a.factors["fridge_recent"] is True
     assert c.a.state == "EATING"
 

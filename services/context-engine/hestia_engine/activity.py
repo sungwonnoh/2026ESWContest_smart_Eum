@@ -86,6 +86,9 @@ class ActivityEvaluator:
         self._world = world
         self._models = models
 
+        self._eating_at: float | None = None      # 마지막으로 EATING 이 선 시각
+        self._eating_since: float | None = None   # 그 끼니에서 처음 선 시각
+
     def evaluate(
         self,
         presence: PresenceContext,
@@ -229,25 +232,36 @@ class ActivityEvaluator:
                 if fridge_recent:
                     appliance += w("EATING", "fridge_recent")
 
-                # 셋을 모두 요구한다. 가중합으로는 이 구별이 되지 않는다 —
-                # 조리 직후에 데우기까지 하면 주방에 들어서기만 해도 문턱을
-                # 넘고, 반대로 식탁에 앉아 신문을 보는 것도 넘는다.
-                #
-                #   체류 + 착석  =  먹는 자세
-                #   가전 신호    =  먹을 것이 준비됨
-                #
-                # 둘 중 하나만으로는 식사가 아니다. 대신 통과한 뒤의 점수는
-                # 가전 신호가 쌓일수록 올라가 확신도에 그대로 반영된다.
+                gap_sec = float(self._config.value(
+                    "activity", "meal", "eating_gap_sec", default=120
+                ))
+                sustain = float(self._config.value(
+                    "activity", "meal", "eating_sustain_sec", default=3600
+                ))
+                recent = (
+                    self._eating_at is not None
+                    and now - self._eating_at <= gap_sec
+                )
+                eating = (
+                    recent
+                    and self._eating_since is not None
+                    and now - self._eating_since <= sustain
+                )
+                factors["eating_sustain"] = eating
+
                 if (
                     dwell >= dwell_need
                     and self._settled_in(meal_areas)
-                    and appliance > 0.0
+                    and (appliance > 0.0 or eating)
                 ):
                     s["EATING"] = (
                         w("EATING", "meal_area_dwell")
                         + w("EATING", "settled")
                         + appliance
                     )
+                    if not recent:
+                        self._eating_since = now      # 새 끼니다
+                    self._eating_at = now
 
             # 조리도 식사도 아닌 주방 체류. t0 오염을 막는 자리다 —
             # 물 마시러 30초 들른 것이 EATING 으로 잡히면 KDE 분포가 망가진다.
