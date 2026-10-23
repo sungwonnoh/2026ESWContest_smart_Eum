@@ -36,13 +36,13 @@ class Ctx:
             publish=lambda t, p, r: self.pub.publish(t, p, retain=r),
         )
 
-    def state(self, vid: str, device_type: str, **fields):
+    def state(self, vid: str, device_type: str, *, delay: float = 1.0, **fields):
         """가전 state 를 World 에 넣는다. 노드가 명령을 실행한 결과다.
 
-        명령과 같은 시각이면 '명령 전의 보고' 로 걸러지므로 조금
-        흘린다 — 실제로도 노드가 실행하고 보고하기까지 시차가 있다.
+        delay 는 명령으로부터의 시차다. 기본 1초는 '사람이 만졌다' 쪽,
+        0.1 초는 '노드가 재발행했다' 쪽을 흉내낸다.
         """
-        self.clock.advance_by(1)
+        self.clock.advance_by(delay)
         body = {
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "device_type": device_type, "source": "mock", **fields,
@@ -338,3 +338,56 @@ def test_devices_of_type_ignores_channel_flag(c):
 
 def test_devices_of_type_empty(c):
     assert c.control.devices_of_type("doorbell", "bathroom") == ()
+
+def test_not_reverted_right_after_command(c):
+    """명령 직후의 어긋남은 되돌림이 아니다. 낡은 재발행일 수 있다.
+
+    노드는 시계 점프와 부팅에 가전 상태를 전부 재발행한다. 그대로
+    비교하면 수면 프로브가 뜨는 순간 AWAKE 로 죽는다
+    (2026-10-23 실측 probe_sec=0).
+    """
+    c.control.set("vd-02", power="ON", brightness=70, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=100)
+    assert c.control.reverted("vd-02") is False
+
+
+def test_reverted_after_settle_window(c):
+    """창이 지났는데도 어긋나면 사용자가 바꾼 것이다."""
+    c.control.set("vd-02", power="ON", brightness=70, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", power="ON", brightness=100)
+    assert c.control.reverted("vd-02") is True
+
+
+def test_stale_resend_then_target(c):
+    """재발행이 먼저 와도 뒤이어 명령값이 오면 되돌림이 아니다."""
+    c.control.set("vd-02", power="ON", brightness=70, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=100)
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=70)
+    assert c.control.reverted("vd-02") is False
+
+
+def test_reaching_target_then_changed(c):
+    """따라온 뒤 달라지면 되돌림이다 — 프로브의 응답 감지가 이 경로다."""
+    c.control.set("vd-02", power="ON", brightness=70, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=70)
+    assert c.control.reverted("vd-02") is False
+    c.state("vd-02", "smart_light", power="ON", brightness=100)
+    assert c.control.reverted("vd-02") is True
+
+
+def test_new_command_requires_reaching_again(c):
+    """새 명령은 정착을 다시 요구한다 — 프로브 2단계가 이것이다."""
+    c.control.set("vd-02", power="ON", brightness=70, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=70)
+    c.control.set("vd-02", power="ON", brightness=30, reason="SLEEP_ROUTINE")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=70)
+    assert c.control.reverted("vd-02") is False
+
+
+def test_forget_clears_settle(c):
+    """기록을 놓으면 정착도 함께 놓는다."""
+    c.control.set("vd-02", power="ON", brightness=70, reason="DAY_LIGHT")
+    c.state("vd-02", "smart_light", delay=0.1, power="ON", brightness=70)
+    c.control.forget("vd-02")
+    c.state("vd-02", "smart_light", power="ON", brightness=100)
+    assert c.control.reverted("vd-02") is False
