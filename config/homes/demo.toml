@@ -117,7 +117,7 @@ id = "vs-08"
 type = "presence"
 area = "bedroom"
 roles = ["SLEEP"]
-source = "esp32"
+source = "mock"
 node = "esp32-1"
 note = "침대 mmWave — energy 로 수면/각성 구분"
 
@@ -212,7 +212,7 @@ note = "배너 채널. remote_input 은 수면 판단의 핵심 신호"
 id = "vd-02"
 device_type = "smart_light"
 area = "living"
-source = "tasmota"
+source = "mock"
 channel = true
 note = "비언어 신호 채널"
 
@@ -265,8 +265,8 @@ note = "cycle_completed 후 vs-13 으로 수거 확인"
 [[devices]]
 id = "vd-09"
 device_type = "smart_light"
-area = "tasmota"
-source = "mock"
+area = "bedroom"
+source = "tasmota"
 channel = true
 
 [[devices]]
