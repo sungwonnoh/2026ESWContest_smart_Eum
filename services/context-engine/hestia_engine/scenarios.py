@@ -143,6 +143,7 @@ class ScenarioRunner:
         self._dl: tuple[str, int] | None = None   # (vid, 바닥 밝기)
         self._dl_at: float | None = None          # 마지막 조정
         self._dl_hold: float | None = None        # 사용자 개입 유예 끝
+        self._dl_why: str | None = None           # 마지막으로 물러난 이유
 
         # 낙상
         self._safety_answered: dict[str, float] = {}   # 구역 → 응답받은 정지 시작 시각
@@ -514,6 +515,10 @@ class ScenarioRunner:
                 probe.target, power="OFF",
                 reason="SLEEP_ROUTINE", priority="low",
             )
+            # 껐으면 놓아준다. 켜둔 채 쥐고 있는 것은 _check_probe 의
+            # 응답 분기뿐이다 — 거기서 놓아주면 DAY_LIGHT 가 사람 보는
+            # 앞에서 밝기를 올린다.
+            self._controller.forget(probe.target)
 
         self._lights_out(skip=probe.target if probe is not None else None)
 
@@ -540,6 +545,7 @@ class ScenarioRunner:
                         vid, power="OFF",
                         reason="SLEEP_ROUTINE", priority="low",
                     )
+                    self._controller.forget(vid)
 
 
     def _log_sleep(
@@ -645,6 +651,7 @@ class ScenarioRunner:
             target, brightness=level,
             reason="SLEEP_ROUTINE", priority="low",
         )
+        self._controller.forget(target)
 
     def _track_awake_areas(self, context: Any) -> None:
         """sleep_end 이후 들른 구역을 모은다."""
@@ -1237,7 +1244,9 @@ class ScenarioRunner:
             return []
 
         if self._controller.reverted(vid):
-            self._nl = None             # 사용자가 손댔다. 손 뗀다
+            self._controller.forget(vid)
+            self._nl = None
+            log.info("야간 조명 손 뗌 — %s 를 사용자가 손댔다", vid)
             return []
 
         timeout = float(self._nl_value("timeout_sec", 1800))
@@ -1254,6 +1263,7 @@ class ScenarioRunner:
             vid, power="OFF", reason="NIGHT_LIGHT",
             transition_ms=int(self._nl_value("transition_ms", 0)) or None,
         )
+        self._controller.forget(vid)
         self._nl = None
         log.info("야간 조명 소등 %s", vid)
         return []
@@ -1281,39 +1291,49 @@ class ScenarioRunner:
             # 저녁부터는 손대지 않는다. 어두워지면 사람이 직접 켜고,
             # 그 시간대에 조명을 올리는 것은 수면에 나쁘다.
             self._dl = None            # 다음 날 바닥을 다시 잡는다
+            # 개입 유예도 같이 버린다. 하루를 넘겨 다음 날 낮까지 묶어두는
+            # 것은 '손댄 뒤 2시간' 이라는 뜻과 다르다.
+            self._dl_hold = None
+            self._dl_why = None
             return []
 
         if self._dl_hold is not None and now < self._dl_hold:
+            self._dl_why = "사용자 개입 유예"   # 타이머가 있으니 _dl_skip 을 안 쓴다
             return [("day-light", self._dl_hold)]
 
         found = self._lux_area()
         if found is None:
-            return []                  # 조도 센서가 없다
+            return self._dl_skip("조도 센서가 없다")
         area, lux = found
 
         presence = getattr(context, "presence", None)
         if presence is None or not presence.areas.get(area):
-            return []                  # 아무도 없는 방을 밝힐 이유가 없다
+            return self._dl_skip(f"{area} 에 사람이 없다")
 
         lights = self._controller.devices_of_type("smart_light", area)
         if not lights:
-            return []
+            return self._dl_skip(f"{area} 에 조명이 없다")
         vid = lights[0]
 
         st = self._world.device(vid)
         if st is None or st.get("power") != "ON":
             self._dl = None            # 시스템이 더한 몫을 잊는다
-            return []
+            return self._dl_skip(f"{vid} 가 꺼져 있다")
 
         # 다른 시나리오가 쥐고 있거나 사용자가 손댔다
         cmd = self._controller.last_for(vid)
         if cmd is not None and cmd.reason != "DAY_LIGHT":
             self._dl = None
-            return []
+            return self._dl_skip(f"{vid} 를 {cmd.reason} 이 쥐고 있다")
         if self._controller.reverted(vid):
             self._dl = None
             self._controller.forget(vid)
             self._dl_hold = now + float(self._dl_value("manual_override_sec", 7200))
+            self._dl_why = "사용자 개입 유예"
+            log.info(
+                "주간 조명 손 뗌 — %s 를 사용자가 되돌렸다. %.0f분 쉰다",
+                vid, (self._dl_hold - now) / 60,
+            )
             return [("day-light", self._dl_hold)]
 
         gap = float(self._dl_value("min_adjust_interval_sec", 60))
@@ -1322,7 +1342,7 @@ class ScenarioRunner:
 
         cur = self._brightness_of(vid)
         if cur is None:
-            return []                  # 조명 상태를 모른다
+            return self._dl_skip(f"{vid} 의 밝기를 모른다")
 
         # 바닥은 처음 손대는 시점의 밝기다. 사용자가 맞춘 값이므로
         # 그 아래로는 내리지 않는다.
@@ -1342,10 +1362,10 @@ class ScenarioRunner:
 
         self._controller.set(
             vid, power="ON", brightness=want, reason="DAY_LIGHT", priority="low",
-            # 뚝 끊기면 조명이 고장난 것처럼 읽힌다. 0 이면 즉시 바뀐다.
             transition_ms=int(self._dl_value("transition_ms", 0)) or None,
         )
         self._dl_at = now
+        self._dl_why = None            # 돌았으니 다음 물러남은 다시 찍는다
         log.info("주간 조명 %s %s → %s%% (lux=%s)", vid, cur, want, round(lux))
         return [("day-light", now + gap)]
 
@@ -1366,6 +1386,17 @@ class ScenarioRunner:
 
     def _dl_value(self, key: str, default: Any) -> Any:
         return self._config.value("scenarios", "day_light", key, default=default)
+
+    def _dl_skip(self, why: str) -> list[tuple[str, float]]:
+        """물러난 이유를 남기고 빈 목록을 돌려준다.
+
+        _day_light 는 메시지 한 건마다 돈다. 그냥 찍으면 초당 수십 줄이라
+        다른 로그가 묻힌다. 이유가 바뀔 때만 남긴다.
+        """
+        if self._dl_why != why:
+            self._dl_why = why
+            log.info("주간 조명 물러남 — %s", why)
+        return []
 
 
     # ------------------------------------------------------------ 판정 발행
