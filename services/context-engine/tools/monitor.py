@@ -33,7 +33,6 @@ import json
 import sys
 import time
 import unicodedata
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -255,9 +254,6 @@ class Inventory:
 
     def kind(self, vid: str) -> str:
         return self._kind.get(vid, "")
-
-    def ids_of(self, kind: str) -> list[str]:
-        return sorted(v for v, k in self._kind.items() if k == kind)
 
 
 # ─── 공통 ────────────────────────────────────────────────────────────────
@@ -855,7 +851,6 @@ class BoardView(View):
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
         self.meds: list[dict] = []         # registry/medications — 등록된 약
-        self.clean: dict = {}              # 로봇청소기 예약 — schedule, set_at, status, due_seen, deferred
         self.day = clock_str("%Y-%m-%d")
 
     def topics(self) -> list[str]:
@@ -865,11 +860,7 @@ class BoardView(View):
                 "hestia/log/t0",
                 "hestia/node/+/announce", "hestia/node/+/status",
                 "hestia/registry/devices",
-                "hestia/registry/medications",
-                # 청소기 state 만 받는다 (--config 가 없으면 가전 전부를 받아 거른다).
-                # board 는 메시지마다 다시 그리므로 넓게 받지 않는다
-                *([f"hestia/device/{v}/state" for v in self.inv.ids_of("robot_cleaner")]
-                  or ["hestia/device/+/state"])]
+                "hestia/registry/medications"]
 
     def reset(self) -> None:
         # 노드 보고는 announce 가 다시 오므로 같이 버린다. 하나도 안 남겨야
@@ -883,7 +874,6 @@ class BoardView(View):
         self.daily = None
         self.count.clear()
         self.meds = []
-        self.clean = {}
         self.day = clock_str("%Y-%m-%d")
 
     def on_jump(self, delta: float) -> None:
@@ -921,57 +911,8 @@ class BoardView(View):
                 self.inv.apply_registry(p.get("devices", []))
             case ["registry", "medications"]:
                 self.meds = [m for m in p.get("medications", []) if isinstance(m, dict)]
-            case ["device", _, "state"] if p.get("device_type") == "robot_cleaner":
-                self._on_cleaner(p)
 
         return []
-
-    # ── 청소 예약 ──
-    # 엔진은 보류를 MQTT 로 알리지 않는다(로그만). 그래서 board 가 엔진과 같은
-    # 기준으로 스스로 보여준다: 예약 시각이 된 순간 수면(SLEEPING) 이면 보류.
-    # 엔진의 실제 판단과는 별개인 화면 표시다.
-
-    def _on_cleaner(self, p: dict) -> None:
-        sched = p.get("schedule") or None
-        if sched != self.clean.get("schedule"):
-            # 예약이 바뀌면 새로 센다. 넣은 뒤 처음 오는 그 시각이 예약 시각이다
-            self.clean = {"schedule": sched, "set_at": now()}
-        status = str(p.get("status") or "")
-        if status == "CLEANING" and self.clean.get("status") != "CLEANING":
-            # 이번 회차는 시작됐다. 끝나면 다음에 오는 같은 시각을 기다린다
-            self.clean = {"schedule": sched, "set_at": now()}
-        self.clean["status"] = status
-
-    @staticmethod
-    def _clean_due(sched: str, set_at: float) -> float | None:
-        """set_at 뒤에 처음 오는 HH:MM. 오늘 그 시각이 이미 지났으면 다음 날이다."""
-        try:
-            h, m = (int(x) for x in str(sched).split(":"))
-            base = datetime.fromtimestamp(set_at).replace(
-                hour=h, minute=m, second=0, microsecond=0)
-        except (ValueError, TypeError):
-            return None
-        if base.timestamp() <= set_at:
-            base += timedelta(days=1)
-        return base.timestamp()
-
-    def _cleaner_line(self) -> str | None:
-        c = self.clean
-        sched = c.get("schedule")
-        if not sched or c.get("status") == "CLEANING":
-            return None                          # 예약이 없거나 청소가 시작됐다 — 띄우지 않는다
-        due = self._clean_due(sched, float(c.get("set_at") or now()))
-        if due is None:
-            return f"청소 예약 {sched} (시각을 못 읽음)"
-        if now() < due:
-            return f"청소 예약 {sched}"
-        if not c.get("due_seen"):
-            # 예약 시각이 된 그 순간의 상태로 한 번만 정한다 (엔진과 같다)
-            c["due_seen"] = True
-            c["deferred"] = str(self.act.get("state")) == "SLEEPING"
-        if c.get("deferred"):
-            return f"청소 시작 보류 (예약 {sched} · 수면 중)"
-        return f"청소 예약 {sched} 도달"
 
     def render(self) -> str:
         W = self.W
@@ -1016,9 +957,6 @@ class BoardView(View):
             names = ", ".join(str(m.get("name", "?")) for m in self.meds[:3])
             more = f" +{len(self.meds) - 3}" if len(self.meds) > 3 else ""
             row(f"  등록약 {names}{more}")
-        cleaner = self._cleaner_line()
-        if cleaner:
-            row(f"  {cleaner}")
         row()
 
         if not self.nodes:
