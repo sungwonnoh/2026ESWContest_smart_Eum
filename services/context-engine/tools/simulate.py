@@ -69,6 +69,7 @@ INITIAL = {
     "cooktop": {"status": "INITIAL"}, 
 }
 DEFAULT_INITIAL = {"power": "OFF"}
+DEFAULT_OWNED = "mock,thinq"
 
 # action 별로 바뀌는 필드 (명세). set 은 params 를 그대로 병합한다.
 ACTION_EFFECT = {
@@ -159,18 +160,30 @@ class Simulator:
     """가전 상태를 들고 cmd 에 반응한다. 센서는 손으로 쏜다."""
     LUX_PER_BRIGHTNESS = 4.0
 
-    def __init__(self, config: Config, host: str, port: int, *, watch: bool = True) -> None:
+    def __init__(
+        self, config: Config, host: str, port: int, *,
+        watch: bool = True, owned: frozenset[str] | None = None,
+    ) -> None:
         self._config = config
         self._host = host
         self._port = port
         self._running = False
         self._watch = watch
+        self._owned = owned if owned is not None else frozenset({"mock", "thinq"})
 
         self.devices: dict[str, dict[str, Any]] = {
             d.id: dict(INITIAL.get(d.device_type, DEFAULT_INITIAL))
             for d in config.all_devices()
-            if d.enabled
+            if d.enabled and self._mine(d.source)
         }
+
+        # 실물이 맡은 것 — vid → source. 명령은 여전히 보내되 상태는 안 쏜다.
+        self._handed: dict[str, str] = {
+            item.id: item.source
+            for item in (*config.all_sensors(), *config.all_devices())
+            if item.enabled and not self._mine(item.source)
+        }
+
         self._seq: dict[str, int] = {}
         self._cmd_seq: int = 0             # 시뮬레이터가 쏘는 cmd 의 cmd_id
         # (적용할 시각, vid, params) — transition_ms 를 블로킹 없이 기다린다
@@ -184,6 +197,7 @@ class Simulator:
         self._fridge_opened_at: float | None = None
         self._lux_base: float = 100.0      # lux 명령이 준 '조명을 뺀' 바닥 조도
         self._lux_owned: bool = True   # False 면 실물 조도 센서가 맡는다
+        self._handed_noted: set[str] = set()
 
         # 시연용 가상 시계. clock 명령이 바꾸고 CLOCK_TOPIC 으로 알린다.
         # 메시지에 실리는 시각과 화면에 찍는 시각만 이것을 쓴다 —
@@ -199,7 +213,7 @@ class Simulator:
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
         )
         self._client.on_connect = self._on_connect
-        self._client.on_disconnect = self._on_disconnect 
+        self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
         self._connected = False
 
@@ -231,8 +245,15 @@ class Simulator:
 
         print(
             f"브로커 {self._host}:{self._port} — help 로 명령 목록"
+            f"\n상태 발행: {', '.join(sorted(self._owned))}"
+            f" — 가전 {len(self.devices)}대"
             f"\npresence 하트비트 {self._hb_period:g}초 (heartbeat off 로 끔)"
         )
+        if self._handed:
+            items = ", ".join(
+                f"{vid}({src})" for vid, src in sorted(self._handed.items())
+            )
+            print(f"실물에 넘김: {items}")
         next_retry = 0.0
         while self._running:
             if not self._connected and time.monotonic() >= next_retry:
@@ -267,7 +288,7 @@ class Simulator:
             return
 
         self._connected = True
-        
+
         client.subscribe(CLOCK_TOPIC, qos=1)
         client.subscribe("hestia/device/+/cmd", qos=1)
         if self._watch:
@@ -413,7 +434,10 @@ class Simulator:
 
     def _handle_cmd(self, cmd: DeviceCommand) -> None:
         if cmd.target not in self.devices:
-            print(f"모르는 기기: {cmd.target}")
+            if cmd.target in self._handed:
+                self._note_handed(cmd.target)     # 실물이 처리한다
+            else:
+                print(f"모르는 기기: {cmd.target}")
             return
 
         if cmd.action == "set":
@@ -549,6 +573,9 @@ class Simulator:
         if s is None:
             print(f"모르는 센서: {vid}")
             return
+        if not self._mine(s.source):
+            self._note_handed(vid)
+            return
         payload = {
             "version": SRC_VERSION,
             "sent_ts": int(self._now()),
@@ -630,6 +657,23 @@ class Simulator:
         return float(
             self._config.value("presence", "settle_spread_max_cm", default=40)
         )
+
+    def _mine(self, source: str | None) -> bool:
+        """내가 상태를 쏠 대상인가. all 이면 전부 내 몫이다."""
+        if "all" in self._owned:
+            return True
+        return (source or "mock") in self._owned
+
+    def _note_handed(self, vid: str) -> None:
+        """실물에 넘긴 vid 라는 것을 한 번 알린다.
+
+        조용히 빠지면 '왜 안 되지' 로 한참 헤맨다.
+        """
+        src = self._handed.get(vid)
+        if src is None or vid in self._handed_noted:
+            return
+        self._handed_noted.add(vid)
+        print(f"  {vid} 는 실물({src})이 맡는다 — 발행하지 않음")
 
     # ------------------------------------------------------------ 입력
 
@@ -1029,6 +1073,11 @@ class Simulator:
         false 로 덮으면 그 값이 기억되므로, 하트비트가 옛 재실을
         되살리지 않는다.
         """
+        s = self._config.sensor(vid)
+        if s is not None and not self._mine(s.source):
+            self._note_handed(vid)
+            return
+
         self._presence_last[vid] = fields
         self._hb_next = time.time() + self._hb_period
         self._publish_sensor(vid, **fields)
@@ -1059,12 +1108,16 @@ class Simulator:
                 if other == area:
                     continue
                 ovid = self._sensor_in(other, "presence")
-                if ovid is not None:
-                    self._emit_presence(ovid, {
-                        "present": False, "confidence": "high",
-                        "energy": 0, "distance_cm": 0,
-                        "target": "NONE", "dist_spread_cm": 0,
-                    })
+                if ovid is None:
+                    continue
+                os_ = self._config.sensor(ovid)
+                if os_ is None or not self._mine(os_.source):
+                    continue                      # 실물 구역은 내가 못 비운다
+                self._emit_presence(ovid, {
+                    "present": False, "confidence": "high",
+                    "energy": 0, "distance_cm": 0,
+                    "target": "NONE", "dist_spread_cm": 0,
+                })
 
         self._emit_presence(vid, {
             "present": present,
@@ -1861,6 +1914,14 @@ def main(argv: list[str] | None = None) -> int:
         "--no-watch", action="store_true",
         help="엔진이 내보내는 것을 찍지 않는다",
     )
+    parser.add_argument(
+        "--owned-by",
+        default=os.environ.get("HESTIA_SIM_OWNED", DEFAULT_OWNED),
+        help=(
+            "상태를 쏠 source 목록(쉼표). 실물이 맡은 것은 뺀다. "
+            "all 이면 전부 시뮬레이터가 쏜다"
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.config)
@@ -1870,7 +1931,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"설정 오류: {exc}")
         return 1
 
-    sim = Simulator(config, args.host, args.port, watch=not args.no_watch)
+    owned = frozenset(
+        s.strip() for s in args.owned_by.split(",") if s.strip()
+    )
+    if not owned:
+        print("--owned-by 가 비었다")
+        return 1
+
+    sim = Simulator(
+        config, args.host, args.port,
+        watch=not args.no_watch, owned=owned,
+    )
+
     try:
         sim.run()
     except KeyboardInterrupt:
