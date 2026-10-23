@@ -851,6 +851,7 @@ class BoardView(View):
         self.daily: dict | None = None     # context/day — retained, 오늘 치가 다 들어온다
         self.count: dict[str, int] = {}    # context/day 가 없을 때 t0 를 직접 센다
         self.meds: list[dict] = []         # registry/medications — 등록된 약
+        self.cleaner: dict = {}            # robot_cleaner 상태 — 예약 시각과 진행 여부
         self.day = clock_str("%Y-%m-%d")
 
     def topics(self) -> list[str]:
@@ -859,6 +860,7 @@ class BoardView(View):
                 "hestia/context/suppression", "hestia/context/day",
                 "hestia/log/t0",
                 "hestia/node/+/announce", "hestia/node/+/status",
+                "hestia/device/+/state",
                 "hestia/registry/devices",
                 "hestia/registry/medications"]
 
@@ -874,6 +876,7 @@ class BoardView(View):
         self.daily = None
         self.count.clear()
         self.meds = []
+        self.cleaner = {}
         self.day = clock_str("%Y-%m-%d")
 
     def on_jump(self, delta: float) -> None:
@@ -907,6 +910,9 @@ class BoardView(View):
                 n = self.nodes.setdefault(nid, {})
                 n["online"] = bool(p.get("online"))
                 n["ts_synced"] = bool(p.get("ts_synced"))
+            case ["device", _, "state"]:
+                if str(p.get("device_type") or "") == "robot_cleaner":
+                    self.cleaner = p
             case ["registry", "devices"]:
                 self.inv.apply_registry(p.get("devices", []))
             case ["registry", "medications"]:
@@ -957,6 +963,9 @@ class BoardView(View):
             names = ", ".join(str(m.get("name", "?")) for m in self.meds[:3])
             more = f" +{len(self.meds) - 3}" if len(self.meds) > 3 else ""
             row(f"  등록약 {names}{more}")
+        clean = self._clean_line()
+        if clean:
+            row(clean)
         row()
 
         if not self.nodes:
@@ -982,6 +991,41 @@ class BoardView(View):
             return n("meals"), n("hydrations"), n("medications")
         return (self.count.get("meal", 0), self.count.get("hydration", 0),
                 self.count.get("medication", 0))
+
+    def _clean_line(self) -> str | None:
+        """청소 예약 한 줄. 보여줄 게 없으면 None.
+
+        보류 여부는 발행되지 않는다 — ScenarioRunner 내부 상태(_clean_deferred)다.
+        그래서 엔진의 _cleaner 와 같은 재료(예약 시각 · 수면 여부)로 화면에서
+        다시 읽는다. 판단이 둘로 갈리지만 이쪽은 아무것도 바꾸지 않으므로,
+        어긋나면 화면만 틀린다.
+        """
+        st = self.cleaner
+        if not st:
+            return None
+        if str(st.get("status") or "") == "CLEANING":
+            return "  청소   청소 중"
+
+        raw = st.get("schedule")
+        if not raw:
+            return None
+        try:
+            hh, mm = str(raw).split(":")
+            h, m = int(hh), int(mm)
+        except ValueError:
+            return None
+        if not (0 <= h < 24 and 0 <= m < 60):
+            return None
+
+        t = now()
+        lt = time.localtime(t)
+        due = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, m, 0, 0, 0, -1))
+
+        if t < due:
+            return f"  청소   예약 {h:02d}:{m:02d}"
+        if str(self.act.get("state") or "") == "SLEEPING":
+            return f"  청소   보류 (수면 중)   예약 {h:02d}:{m:02d}"
+        return None        # 시각이 지났고 깨어 있다 — 청소기가 알아서 돈다
 
     def _kv(self, label: str, value: Any, conf: Any) -> str:
         c = f"{float(conf):.2f}" if isinstance(conf, (int, float)) else ""

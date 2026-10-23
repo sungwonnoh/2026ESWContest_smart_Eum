@@ -648,7 +648,7 @@ class ScenarioRunner:
         self._probe_base.pop(target, None)
         self._pending_restore = None
         self._controller.set(
-            target, brightness=level,
+            target, power="OFF", brightness=level,
             reason="SLEEP_ROUTINE", priority="low",
         )
         self._controller.forget(target)
