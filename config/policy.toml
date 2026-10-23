@@ -160,6 +160,8 @@ prep_to_eating_gap_sec = 180      # 조리 종료 후 이만큼 지나야 EATING
 cooking_off_window_sec = 3600     # 신설. 이보다 오래되면 그 식사와 무관(1시간)
 heated_window_sec = 900           # 신설. 데운 건 바로 먹는다(15분)
 eating_min_dwell_sec = 300        # 최소 체류
+eating_gap_sec = 120              # 식사 중 일어났다 앉는 공백을 이만큼 허용
+eating_sustain_sec = 3600         # 진입 뒤 이 시간까지는 가전 신호를 다시 묻지 않는다
 fridge_recent_window_sec = 900
 session_timeout_sec = 7200
 

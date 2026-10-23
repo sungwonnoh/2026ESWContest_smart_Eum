@@ -12,7 +12,7 @@ from hestia_engine.sink import Sink
 from hestia_engine.timers import Scheduler
 from hestia_engine.world import WorldState
 
-from test_activity import HOME, POLICY, MORNING
+from test_activity import HOME, POLICY, MORNING, MOVING, SEATED
 
 DATA = Path(__file__).parent / "data" / "morning.jsonl"
 
@@ -43,13 +43,18 @@ class Ctx:
         self.engine.ingest(topic, json.dumps(payload))
         return self
 
-    def presence(self, vid: str, present: bool, energy: int = 50):
+    def presence(
+        self, vid: str, present: bool, energy: int = 50,
+        *, spread: int | None = None,
+    ):
+        if spread is None:
+            spread = (SEATED if energy <= 10 else MOVING) if present else 0
         return self.send(f"hestia/sensor/{vid}/state", {
             "version": 1, "sent_ts": 0, "src_id": vid, "seq": 1,
             "type": "presence", "present": present, "confidence": "high",
             "energy": energy, "distance_cm": 150,
-            "target": ("STATIC" if energy <= 10 else "BOTH") if present else "NONE",
-            "dist_spread_cm": (5 if energy <= 10 else 90) if present else 0,
+            "target": ("STATIC" if spread < 40 else "BOTH") if present else "NONE",
+            "dist_spread_cm": spread if present else 0,
         })
 
     def profile(self, name: str):
@@ -630,7 +635,7 @@ def test_after_meal_fires_after_eating(c):
     c.presence("vs-04", True)
     c.at(MORNING + 100).power("vs-06", 1180, "ON")
     c.at(MORNING + 1000).power("vs-06", 3, "STANDBY")
-    c.at(MORNING + 1300).presence("vs-04", True, energy=12)   # EATING
+    c.at(MORNING + 1300).presence("vs-04", True, spread=SEATED)   # EATING
     c.at(MORNING + 1600).presence("vs-04", False)
     c.at(MORNING + 2400)                                      # grace 경과 — 묶음 종료
 

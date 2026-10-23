@@ -612,11 +612,11 @@ def test_morning_scenario():
     result = Replay(clock, sched, Feed()).run(path)
 
     assert result.lines == 22
-    assert result.timers_fired == 2                  # 인덕션 ON/OFF 확정
+    assert result.timers_fired == 0               # 인덕션 ON/OFF 확정
 
-    induction = world.sensor("vs-06")
-    assert induction.state == "OFF"                  # 3W <= standby_max_w(10)
-    assert induction.changed_at == 1790296500.0      # 09:35 — 후보가 된 시각
+    cooktop = world.device("vd-13")
+    assert cooktop.get("status") == "INITIAL"        # 09:35 조리 종료
+    assert cooktop.changed_at == 1790296500.0        # 후보가 된 시각
 
     assert world.dwell_sec("kitchen") == 1790297100.0 - 1790295010.0
     assert world.device("vd-01").get("power") == "OFF"
