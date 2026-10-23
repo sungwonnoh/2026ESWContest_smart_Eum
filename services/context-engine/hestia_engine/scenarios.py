@@ -1802,7 +1802,7 @@ class ScenarioRunner:
            싣지 않는다 — 어떤 약인지는 앱에서 보고, 여기서는 챙기라고만 한다.
         """
         h, m = divmod(peak.center, 60)
-        base = f"{h}시{m:02d}분쯤\n식사하셨나요?"
+        base = f"식사하셨나요?"
 
         if self._after_meal_meds_for(peak, today):
             return f"{base}\n약도 챙기세요"
@@ -1812,7 +1812,7 @@ class ScenarioRunner:
         """음성에는 약 이름까지 말한다."""
         h, m = divmod(peak.center, 60)
         at = f"{h}시" if m == 0 else f"{h}시 {m}분"
-        base = (f"보통 {at}쯤 식사를 하시는데, 아직 식사 전이신가요? "
+        base = (f"아직 식사 전이신가요? "
                 "끼니를 거르지 말고 챙겨 드세요.")
         meds = self._after_meal_meds_for(peak, today)
         if meds:
