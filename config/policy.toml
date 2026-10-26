@@ -344,7 +344,7 @@ text = "빨래가\n다 됐어요"
 # 명세: 각각은 규칙을 지켰는데 총량이 과한 상황을 막는다.
 
 [limits]
-max_per_day = 50
+max_per_day = 40
 min_interval_sec = 1800
 quiet_hours = { start = "22:00", end = "07:00" }   # 음성 채널 금지 시간대
 exempt_scenarios = ["SLEEP_ROUTINE", "MEDICATION_PROMPT"]               # SLEEP_ROUTINE 알림은 총량 제한에서 제외
