@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <cstdio>
 #include "payload.h"
 #include "ld2410_frame.h"
 
@@ -158,12 +159,19 @@ void test_seq_independent_per_virtual_id(void) {
 void test_seq_slots_full(void) {
     SeqCounter c;
     uint32_t s;
-    const char* ids[] = {"a","b","c","d","e","f","g","h"};
 
-    for (int i = 0; i < 8; i++) {
+    // 칸 수를 베껴 적지 않는다. MAX_IDS 가 8에서 12로 늘었을 때 이
+    // 테스트가 따라오지 못해 '가득 찬 뒤 거부한다' 를 더는 검증하지
+    // 않았다 — 8칸만 채우고 9번째가 성공해서 실패했다.
+    //
+    // Slot.id 는 포인터로 들고 있으므로(payload.h) id 문자열이 카운터보다
+    // 오래 살아야 한다. 지역 배열이면 된다.
+    char ids[SeqCounter::MAX_IDS][8];
+    for (uint8_t i = 0; i < SeqCounter::MAX_IDS; i++) {
+        snprintf(ids[i], sizeof(ids[i]), "v-%02u", i);
         TEST_ASSERT_TRUE(c.next(ids[i], s));
     }
-    TEST_ASSERT_FALSE(c.next("overflow", s));   // 9번째는 실패
+    TEST_ASSERT_FALSE(c.next("overflow", s));
 }
 
 // ── status ───────────────────────────────────
