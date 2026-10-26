@@ -1,5 +1,8 @@
 import pytest
 
+from datetime import datetime, timedelta
+from hestia_engine.timeutil import KST
+
 from hestia_engine.clock import ReplayClock
 from hestia_engine.config import load
 from hestia_engine.context import PresenceContext, SuppressionContext
@@ -314,12 +317,33 @@ def test_proxy_deduplicates(c):
 
 
 def test_daily_limit(c):
+    """하루 상한.
+
+    min_interval 보다 촘촘히 보낼 수 없으니, 상한까지 세려면 그만큼의
+    시간이 하루 안에 남아 있어야 한다. 그래서 자정 직후로 옮겨서 센다 —
+    MORNING(09:40)에서 시작하면 상한에 닿기 전에 날이 바뀌고
+    _roll_day 가 횟수를 리셋한다.
+    """
+    cap = int(c.config.value("limits", "max_per_day", default=8))
+    gap = float(c.config.value("limits", "min_interval_sec", default=1800))
+
+    need = cap * (gap + 1)
+    assert need < 86400 - 120, (
+        f"max_per_day({cap}) × min_interval({gap:.0f}초) = {need / 3600:.1f}시간 — "
+        "하루에 상한까지 보낼 수 없다. 상한이 아니라 장식이다"
+    )
+
+    # 다음 자정 직후로 옮긴다. limits 는 그 뒤에 만들어야 _day 가 맞다
+    now = datetime.fromtimestamp(c.clock.now(), KST)
+    start = now.replace(hour=0, minute=1, second=0, microsecond=0) + timedelta(days=1)
+    c.clock.advance_to(start.timestamp())
+
     limits = NotifyLimits(c.clock, c.config)
-    for i in range(8):
+    for _ in range(cap):
         ok, _ = limits.allows("normal")
         assert ok
         limits.note_sent()
-        c.clock.advance_by(2000)             # min_interval 회피
+        c.clock.advance_by(gap + 1)          # min_interval 회피
 
     ok, why = limits.allows("normal")
     assert ok is False

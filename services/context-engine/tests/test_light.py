@@ -4,16 +4,20 @@
 되돌리므로 사용자가 맞춘 밝기 아래로는 내려가지 않는다.
 """
 
+import tomllib
+
 import pytest
 
-from test_activity import MORNING, NIGHT
+from test_activity import MORNING, NIGHT, POLICY
 from test_sleep import Ctx
 
-FLOOR = 300          # scenarios.day_light.floor_lux
-CEILING = 600
-STEP = 10
-GAP = 60             # min_adjust_interval_sec
-HOLD = 7200          # manual_override_sec
+_DL = tomllib.loads(POLICY)["scenarios"]["day_light"]
+
+FLOOR = int(_DL["floor_lux"])
+CEILING = int(_DL["ceiling_lux"])
+STEP = int(_DL["step"])
+GAP = float(_DL["min_adjust_interval_sec"])
+HOLD = float(_DL["manual_override_sec"])
 
 LUX = "vs-15"        # 거실 조도 센서
 LIGHT = "vd-02"      # 거실 조명
@@ -65,20 +69,21 @@ def test_no_change_inside_deadband(c):
 
 
 def test_lowers_only_to_baseline(c):
-    """사용자가 맞춘 40% 아래로는 내리지 않는다. 이 설계의 전부다."""
-    living(c, brightness=40)
+    """사용자가 맞춘 밝기 아래로는 내리지 않는다. 이 설계의 전부다."""
+    base = 40
+    living(c, brightness=base)
     lux(c, FLOOR - 50)
     c.engine.scenarios.tick(c.engine.context)
-    assert dl(c)[-1]["params"]["brightness"] == 50
+    assert dl(c)[-1]["params"]["brightness"] == base + STEP
 
     # 기기가 반영을 보고하고 해가 들어온다 — 시계를 넘기기 전에
-    c.light(LIGHT, power="ON", brightness=50, seq=2)
+    c.light(LIGHT, power="ON", brightness=base + STEP, seq=2)
     lux(c, CEILING + 100, seq=2)
     c.at(MORNING + GAP + 5)
-    assert dl(c)[-1]["params"]["brightness"] == 40      # 바닥
+    assert dl(c)[-1]["params"]["brightness"] == base      # 바닥
 
     # 더 밝아져도 더는 안 내린다
-    c.light(LIGHT, power="ON", brightness=40, seq=3)
+    c.light(LIGHT, power="ON", brightness=base, seq=3)
     lux(c, CEILING + 500, seq=3)
     before = len(dl(c))
     c.at(MORNING + GAP * 2 + 10)
@@ -92,8 +97,9 @@ def test_user_change_starts_hold(c):
     c.engine.scenarios.tick(c.engine.context)
     before = len(dl(c))
 
-    # 명령보다 늦은 시각이어야 되돌림으로 잡힌다
-    c.at(MORNING + 10)
+    # 명령보다는 늦어야 되돌림으로 잡히고(control.revert_settle_sec),
+    # GAP 보다는 일러야 그 사이에 조정이 한 번 더 나가지 않는다
+    c.at(MORNING + GAP / 2)
     c.light(LIGHT, power="ON", brightness=20, seq=2)
     assert len(dl(c)) == before
 
