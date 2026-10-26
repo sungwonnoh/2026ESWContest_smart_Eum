@@ -1,0 +1,19 @@
+[project]
+name = "hestia-thinq"
+version = "0.1.0"
+description = "HESTIA ThinQ 브리지 — LG ThinQ Connect 응답을 hestia/device 스키마로 번역"
+requires-python = ">=3.9"
+dependencies = [
+    "paho-mqtt>=2.0",
+]
+
+[project.optional-dependencies]
+# 라이브 경로만 쓴다. replay 와 변환기 테스트는 SDK 없이 돈다
+live = ["thinqconnect>=1.0.14", "aiohttp>=3.9"]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["hestia_thinq"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
