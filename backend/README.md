@@ -218,7 +218,7 @@ MQTT 원본 스키마는 바꾸지 않고 Backend 에서 Flutter DTO 로 바꾼�
 | 그 외 | `priority` 가 `safety` 면 `SAFETY`, 아니면 `INFO` |
 
 `channels` 는 공간이 아니라 발송 대상 virtual_id 목록이다. 앞에서부터 `hestia/registry/devices` 의
-`area` 를 찾은 첫 채널을 `roomId` 로 쓴다. `voice` (RPi4 TTS) 는 건너뛴다.
+`area` 를 찾은 첫 채널을 `roomId` 로 쓴다. `voice` (RPi5 TTS) 는 건너뛴다.
 찾지 못하면 (voice 만 있음, registry 수신 전, 미등록 장치) 오류 없이 `roomId = null` 이다.
 registry 가 정본이므로 앱 설정의 가전 공간으로 대신 채우지 않는다. 장치 채널이 있는데 공간을 못 찾으면 warning 로그를 남긴다.
 area 와 앱 room id 는 같은 내부 ID 체계라 별도 변환 표 없이 그대로 쓴다.
