@@ -189,7 +189,7 @@ cd services/learning-engine && python3 -m pytest tests -q
 
 Python 3.9 이상. Context Engine 계약 테스트는 Python 3.11 이상에서만 돌고 그 외에는 건너뜁니다.
 
-## RPi E2E 확인 (SLEEP.md §10)
+## RPi E2E 확인
 
 ```bash
 # RPi4: 학습 → 발행
@@ -244,8 +244,8 @@ CASAS 6명 (proxy): sleep_time 0.342 ~ 0.524, wake_time 0.317 ~ 0.386 (표 5절)
 - 표본 수 영향은 작습니다 (std 30분: n 14 → 0.515, n 212 → 0.529).
 - 하루 여러 번인 `meal_time`은 규칙적이어도 entropy가 커서 값이 낮습니다.
 
-`config/policy.toml`의 `predictability_min = 0.05`는 이전(정규화 전) 계산 기준입니다.
-현재 스케일에서는 std 120분도 0.225라 사실상 모두 통과합니다.
+`config/policy.toml`의 `predictability_min`은 식사 0.20, 기상·수분 0.05입니다.
+정규화 전 계산 기준으로 정한 값이라, 현재 스케일에서는 std 120분도 0.225라 사실상 모두 통과합니다.
 새 값은 위 결과를 근거로 팀에서 정합니다 (이 모듈에서 수정하지 않음).
 
 ## 고도화 옵션 (기본 꺼짐)

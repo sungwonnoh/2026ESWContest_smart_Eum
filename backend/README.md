@@ -218,7 +218,7 @@ MQTT 원본 스키마는 바꾸지 않고 Backend 에서 Flutter DTO 로 바꾼�
 | 그 외 | `priority` 가 `safety` 면 `SAFETY`, 아니면 `INFO` |
 
 `channels` 는 공간이 아니라 발송 대상 virtual_id 목록이다. 앞에서부터 `hestia/registry/devices` 의
-`area` 를 찾은 첫 채널을 `roomId` 로 쓴다. `voice` (RPi4 TTS) 는 건너뛴다.
+`area` 를 찾은 첫 채널을 `roomId` 로 쓴다. `voice` (RPi5 TTS) 는 건너뛴다.
 찾지 못하면 (voice 만 있음, registry 수신 전, 미등록 장치) 오류 없이 `roomId = null` 이다.
 registry 가 정본이므로 앱 설정의 가전 공간으로 대신 채우지 않는다. 장치 채널이 있는데 공간을 못 찾으면 warning 로그를 남긴다.
 area 와 앱 room id 는 같은 내부 ID 체계라 별도 변환 표 없이 그대로 쓴다.
@@ -264,7 +264,7 @@ Backend 는 Context Engine 이 발행한 context/notify 를 변환·저장·전�
 
 - `decision_id` ↔ `notify_id` 연결 방식 (위 참고)
 - Context Engine 이 `SENSOR_FAULT` 를 `notify/push` 로 발행하는지
-- 앱 ↔ `hestia/registry/devices` 동기화의 발행 주체: registry 는 RPi4 가 retained 로 발행하고
+- 앱 ↔ `hestia/registry/devices` 동기화의 발행 주체: 현재 저장소에는 registry 를 발행하는 코드가 없다.
   엔진은 수신 시 매핑 전체를 교체한다. FastAPI 출력 토픽(명세 17-A.4)에는 없으므로 정해질 때까지 발행하지 않는다.
 
 ## MQTT 구독 토픽

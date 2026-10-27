@@ -10,33 +10,29 @@ HESTIA는 센서와 생활 로그를 바탕으로 사용자의 현재 상태를 
 ## Architecture
 
 ```text
-ESP32
+ESP32 / Tasmota
   │
   │ Sensor / Device Event
   ▼
-MQTT Broker
-  │
-  ▼
 Raspberry Pi 5
-Context Engine
-  │
-  │ World State / Policy
-  │
-  ├───────────────┐
-  │               │
-  ▼               ▼
-External API   Raspberry Pi 4
-               Learning Engine
-                    │
-                    │ Personal Baseline
-                    │ KDE / HMM / Batch Learning
-                    ▼
-                  MQTT
+  ├─ MQTT Broker (Mosquitto)
+  ├─ Context Engine     World State / FSM / Policy / Notify
+  ├─ FastAPI Backend    App API, SQLite, Caregiver Telegram
+  ├─ TTS                Voice prompt
+  └─ Flutter App (IPK)
+  │                ▲
+  │ hestia/log/t0  │ hestia/model/kde (retained)
+  │                │ hestia/external/weather
+  ▼                │
+Raspberry Pi 4
+  ├─ t0 Logger          t0_log.jsonl
+  ├─ Learning Engine    KDE Batch Learning (daily 03:00)
+  └─ Weather Service
 ```
 
-- **ESP32**: 센서/가전 Mock 및 물리 입력
-- **Raspberry Pi 5**: MQTT Broker, Context Engine, 실시간 상태 추론 및 Policy 판단
-- **Raspberry Pi 4**: 사용자 History 저장, 개인별 Baseline 학습, 배치 처리, 향후 대시보드/TTS
+- **ESP32 / Tasmota**: 센서 수집, 가전 전력 측정 및 제어, 물리 입력
+- **Raspberry Pi 5**: MQTT Broker, Context Engine(실시간 상태 추론·Policy 판단·알림), FastAPI Backend, TTS 음성 안내, Flutter 앱
+- **Raspberry Pi 4**: t0 로그 수집, 개인별 KDE Baseline 배치 학습, 날씨 서비스
 - **MQTT**: 장치와 서비스 간 이벤트 및 모델 결과 전달
 
 ---
@@ -46,36 +42,42 @@ External API   Raspberry Pi 4
 ```text
 hestia-smart-home/
 │
-├── apps/                           # 애플리케이션 계층
-│   └── display/                    # 현재 `display/`를 중심으로 화면 출력 및 사용자 인터페이스
-├── config/                         # 서비스 실행 시 필요한 공통 설정 파일
+├── apps/                           # Flutter 앱 (RPi5 터치스크린, ATLAS IPK)
+├── backend/                        # FastAPI Backend (RPi5) — 앱 API, SQLite, 보호자 텔레그램
+├── config/                         # Context Engine 정책·집 구성 (policy.toml, homes/)
 ├── data/
-│   ├── raw/                        # 다운로드한 원본 데이터
-│   └── processed/                  # 전처리한 데이터
-├── docs/                           # 시스템 설계, 개발 문서, 실험 기록
-├── firmware/                       # ESP32 등 임베디드 장치에서 동작하는 펌웨어를 관리
-│   └── esp32-1/
-├── prototype/                      # 센서 및 실제 하드웨어 연결 전 기능 검증을 위한 프로토타입 코드
+│   ├── raw/                        # CASAS 원본 (GitHub 미포함)
+│   ├── processed/                  # Aruba 전처리 결과
+│   └── synthetic/                  # 합성 사용자 p1 / p2 t0 로그
+├── deploy/                         # systemd 유닛, 환경변수 예시, 시연 스크립트(demo/)
+├── docs/                           # 시스템 설계, 개발 문서
+├── firmware/
+│   └── esp32-1/                    # ESP32 센서 노드 펌웨어 (PlatformIO)
+├── prototype/                      # 초기 Context Engine 프로토타입 (현재는 services/context-engine 이 대체)
 ├── schemas/
-│   └── mqtt/                       # MQTT Topic별 Payload Schema를 정의
+│   └── mqtt/                       # MQTT Topic / Payload Schema
 ├── scripts/
-│   └── datasets/                   # 공개 데이터셋을 HESTIA에서 사용할 수 있는 형태로 변환하는 전처리 스크립트
+│   └── datasets/                   # CASAS 전처리, 합성 데이터 생성
 ├── services/
-│   ├── context-engine/             # Raspberry Pi 5에서 동작하는 실시간 Context Engine
-│   └── learning-engine/            # Raspberry Pi 4에서 동작할 개인화 학습 계층
-├── tests/                          # 테스트 코드
+│   ├── context-engine/             # RPi5 실시간 Context Engine
+│   ├── learning-engine/            # RPi4 KDE 학습, t0 로거
+│   ├── tasmota-bridge/             # Tasmota 스마트플러그(전력)·조명 ↔ HESTIA MQTT
+│   └── weather/                    # RPi4 기상청 날씨 서비스
 ├── .gitignore
 └── README.md
 ```
+
+각 서비스의 테스트는 서비스 폴더 안 `tests/` 에 있습니다.
 
 ---
 
 ## Dataset
 
-개인 생활 패턴 Baseline 검증에는 **CASAS Aruba Smart Home Dataset**을 사용합니다.
+개인 생활 패턴 Baseline 개발·검증에는 **CASAS Smart Home Dataset**(Aruba, Milan, Tulum2, Cairo)과
+합성 사용자 로그(p1 / p2)를 사용합니다.
 
 - Dataset: https://zenodo.org/records/17180309
-- 원본 및 전처리 데이터는 GitHub에 포함하지 않습니다.
+- CASAS 원본은 GitHub에 포함하지 않습니다. Aruba 전처리 결과와 합성 로그는 포함합니다.
 - 다운로드 및 전처리 방법은 [`docs/dataset-setup.md`](docs/dataset-setup.md)를 참고하세요.
 
 ## Learning Engine
@@ -106,10 +108,10 @@ Rule / FSM / 개인 Baseline을 결합해 최종 개입 여부를 판단합니�
 
 현재 주요 개발 방향:
 
-- Context Engine 고도화
-- KDE Baseline MQTT 연동
-- 사용자별 Baseline 저장
-- Batch Learning
+- 실제 사용자 로그 품질 검증 (60~90일, 시간순 holdout)
+- Predictability / 알림 threshold 재검증
+- 사용자별 Baseline 영속 저장
+- Node Health Monitoring
 - HMM 기반 모호한 Activity 추론
 
 세부 진행 상황은 [`docs/development-status.md`](docs/development-status.md)를 참고하세요.

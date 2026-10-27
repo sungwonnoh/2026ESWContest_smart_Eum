@@ -1,5 +1,8 @@
 # HESTIA Context Engine 프로토타입
 
+> 초기 검증용 코드다. 현재 Context Engine 은 [`services/context-engine/hestia_engine/`](../services/context-engine/hestia_engine/) 이 대체하며,
+> 토픽 접두어도 `home/` 이 아니라 `hestia/` 를 쓴다.
+
 MQTT 수신 → World State 갱신 → Context 판단 → Policy → MQTT 발행까지
 end-to-end로 도는지만 확인하는 최소 구성.
 

@@ -5,7 +5,7 @@
 HESTIA는 ESP32, Raspberry Pi 5, Raspberry Pi 4를 역할별로 분리해 구성합니다.
 
 ```text
-ESP32
+ESP32 / Tasmota
   │
   │ Sensor / Device Event
   ▼
@@ -13,28 +13,30 @@ MQTT Broker (RPi5)
   │
   ▼
 Raspberry Pi 5
-Context Engine
-  │
-  ├─ World State
-  ├─ Rule / FSM
-  ├─ KDE Context
-  └─ Policy
+  ├─ Context Engine
+  │    ├─ World State
+  │    ├─ Activity / FSM
+  │    ├─ KDE Context (ModelStore)
+  │    ├─ Policy
+  │    └─ Notify ──→ App Push / TTS / Caregiver
+  ├─ FastAPI Backend (App API, SQLite, Caregiver Telegram)
+  ├─ TTS
+  └─ Flutter App
        │
+       │ hestia/log/t0
        ▼
-Intervention Candidate
-
 Raspberry Pi 4
-Learning Engine
-  │
-  ├─ History
-  ├─ KDE Baseline
-  ├─ Predictability
-  └─ Batch Learning
+  ├─ t0 Logger
+  ├─ Learning Engine
+  │    ├─ History (t0_log.jsonl)
+  │    ├─ KDE Baseline
+  │    ├─ Predictability
+  │    └─ Batch Learning (daily 03:00)
+  └─ Weather Service
        │
-       ▼
-hestia/model/kde
-       │
-       └──────────────→ RPi5 Context Engine
+       │ hestia/model/kde (retained)
+       │ hestia/external/weather
+       └──────────────→ RPi5
 ```
 
 ## ESP32
@@ -50,11 +52,14 @@ hestia/model/kde
 
 ## Raspberry Pi 5
 
-실시간 Context Engine과 MQTT Broker를 담당합니다.
+실시간 Context Engine, MQTT Broker, 사용자 접점(Backend, TTS, 앱)을 담당합니다.
 
 주요 역할:
 
 - MQTT Broker
+- FastAPI Backend (앱 API, SQLite 저장, 보호자 텔레그램 중계)
+- TTS 음성 안내
+- Flutter 앱 실행
 - 센서 이벤트 수신
 - Learning Engine 모델 수신
 - World State 관리
@@ -65,19 +70,20 @@ hestia/model/kde
 - 외부 API 연동
 - Intervention Candidate 생성
 
-현재 Context Engine은 MQTT와 Replay 입력을 모두 단일 진입점으로 처리합니다.
+Context Engine은 MQTT와 Replay 입력을 모두 `ingest()` 하나로 처리합니다.
 
 ```text
 MQTT / Replay
       ↓
 ContextEngine.ingest()
       ↓
- ┌───────────────┐
- │               │
-model          sensor
- │               │
- ▼               ▼
-handle_model   handle_event
+parse (messages.py) → world.apply (World State / ModelStore)
+      ↓
+context 재계산 (Activity / FSM / Presence / Away)
+      ↓
+Scenarios → Policy 판정 → Notify / Controller
+      ↓
+hestia/context/*, hestia/notify/*, hestia/intervention/*, hestia/log/t0 발행
 ```
 
 ## Raspberry Pi 4
@@ -86,14 +92,14 @@ handle_model   handle_event
 
 주요 역할:
 
-- 사용자 History 저장
+- t0 로그 수신 및 사용자 History 저장
 - 개인 Baseline 계산
 - KDE 기반 시간 분포 학습
 - Predictability 계산
 - MQTT Model Payload 생성
 - 주기적 Batch Learning
+- 날씨 서비스 (`hestia/external/weather`)
 - 향후 HMM 재추정
-- 대시보드 / TTS 확장
 
 현재 KDE 모델은 다음 topic으로 RPi5에 전달합니다.
 
@@ -103,32 +109,28 @@ hestia/model/kde
 
 ## KDE Model Flow
 
-현재 구현된 개인화 Meal KDE 흐름은 다음과 같습니다.
+현재 운영 흐름은 다음과 같습니다. 개발·검증에는 CASAS 데이터와 합성 로그를 같은 경로로 학습합니다.
 
 ```text
-CASAS Aruba
+RPi5 Context Engine (활동 묶음 종료)
   ↓
-Meal_Preparation begin
+hestia/log/t0
   ↓
-Breakfast Proxy
+RPi4 hestia-t0-logger → t0_log.jsonl
   ↓
-Gaussian KDE
+run_learning.py (매일 03:00)
   ↓
-24h / 15min / 96-bin density
+Gaussian KDE: meal_time / sleep_time / wake_time
   ↓
-Predictability
+24h / 15min / 96-bin density + 끼니 구간(peaks) + Predictability
   ↓
-MQTT Model Payload
-  ↓
-hestia/model/kde
+hestia/model/kde (QoS 1, retained)
   ↓
 RPi5 ModelStore
   ↓
-Tail Probability + Predictability
+끼니 구간 안 Tail Probability + Predictability
   ↓
-Meal Policy
-  ↓
-Intervention Candidate
+Policy → Scenarios (MEAL_PROMPT 등) → Notify
 ```
 
 동일한 시각이라도 사용자별 KDE 분포가 다르면 서로 다른 판단을 내릴 수 있습니다.

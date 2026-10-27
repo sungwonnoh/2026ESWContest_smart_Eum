@@ -18,8 +18,7 @@ p2 모델 하나만 넣은 뒤** 시작한다.
 
 `hestia/sim/clock` 은 시계 점프 오프셋이고 retained 다. 남아 있으면 `--sim-clock` 으로 켠 엔진이
 기동 직후 지난 시연의 가상 시각으로 넘어간다. `simulate.py` 의 retained 정리(`_clear_retained`)는 이 토픽을
-일부러 남기므로 이 스크립트로 지운다. (`Retained_Debug_Request.md` 의 "시각이 과거로 바뀜" 증상과
-관련 있는지는 확인하지 않았다)
+일부러 남기므로 이 스크립트로 지운다.
 
 ## 순서
 
