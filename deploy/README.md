@@ -1,3 +1,17 @@
+# Deploy
+
+| 장치 | 서비스 | 실행 방식 |
+|---|---|---|
+| RPi5 | Mosquitto, Context Engine, FastAPI Backend(`hestia-api`), TTS, Flutter 앱 | Mosquitto·엔진·Backend 는 docker 컨테이너 (엔진은 `hestia-engine.service` 로도 실행 가능), 앱은 IPK |
+| RPi4 | t0 로거, Learning Engine, 날씨 서비스 | systemd (`hestia-t0-logger`, `hestia-learning.timer`, `hestia-weather`) |
+
+시연 초기화·진행 순서는 [`demo/README.md`](demo/README.md)를 참고한다.
+
+## RPi5 — Context Engine
+
+- `hestia-engine.service`: `python3 -m hestia_engine.runner` 상시 실행
+- `mosquitto.conf`: 브로커 설정
+- `backend.env.sample`: FastAPI Backend 환경변수 예시
 
 ## RPi4 — t0 수신과 학습 (Learning Engine)
 
@@ -26,3 +40,8 @@ systemctl list-timers hestia-learning
 journalctl -u hestia-learning -n 20            # 마지막 학습 결과
 sudo systemctl start hestia-learning           # 지금 바로 한 번 실행
 ```
+
+## RPi4 — 날씨 (Weather)
+
+- `hestia-weather.service`: `python3 -m hestia_weather.runner` 상시 실행, `hestia/external/weather` 발행
+- 환경변수는 `weather.env.example` 참고. 자세한 내용은 [`services/weather/README.md`](../services/weather/README.md)

@@ -70,19 +70,20 @@ Raspberry Pi 4
 - 외부 API 연동
 - Intervention Candidate 생성
 
-현재 Context Engine은 MQTT와 Replay 입력을 모두 단일 진입점으로 처리합니다.
+Context Engine은 MQTT와 Replay 입력을 모두 `ingest()` 하나로 처리합니다.
 
 ```text
 MQTT / Replay
       ↓
 ContextEngine.ingest()
       ↓
- ┌───────────────┐
- │               │
-model          sensor
- │               │
- ▼               ▼
-handle_model   handle_event
+parse (messages.py) → world.apply (World State / ModelStore)
+      ↓
+context 재계산 (Activity / FSM / Presence / Away)
+      ↓
+Scenarios → Policy 판정 → Notify / Controller
+      ↓
+hestia/context/*, hestia/notify/*, hestia/intervention/*, hestia/log/t0 발행
 ```
 
 ## Raspberry Pi 4
@@ -108,32 +109,28 @@ hestia/model/kde
 
 ## KDE Model Flow
 
-현재 구현된 개인화 Meal KDE 흐름은 다음과 같습니다.
+현재 운영 흐름은 다음과 같습니다. 개발·검증에는 CASAS 데이터와 합성 로그를 같은 경로로 학습합니다.
 
 ```text
-CASAS Aruba
+RPi5 Context Engine (활동 묶음 종료)
   ↓
-Meal_Preparation begin
+hestia/log/t0
   ↓
-Breakfast Proxy
+RPi4 hestia-t0-logger → t0_log.jsonl
   ↓
-Gaussian KDE
+run_learning.py (매일 03:00)
   ↓
-24h / 15min / 96-bin density
+Gaussian KDE: meal_time / sleep_time / wake_time
   ↓
-Predictability
+24h / 15min / 96-bin density + 끼니 구간(peaks) + Predictability
   ↓
-MQTT Model Payload
-  ↓
-hestia/model/kde
+hestia/model/kde (QoS 1, retained)
   ↓
 RPi5 ModelStore
   ↓
-Tail Probability + Predictability
+끼니 구간 안 Tail Probability + Predictability
   ↓
-Meal Policy
-  ↓
-Intervention Candidate
+Policy → Scenarios (MEAL_PROMPT 등) → Notify
 ```
 
 동일한 시각이라도 사용자별 KDE 분포가 다르면 서로 다른 판단을 내릴 수 있습니다.

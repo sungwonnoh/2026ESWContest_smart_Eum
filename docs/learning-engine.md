@@ -20,17 +20,15 @@ RPi4는 KDE 모델과 Predictability를 생성하고,
 ## Pipeline
 
 ```text
-breakfast_preparation.csv
+t0_log.jsonl (운영) / CASAS 원본 / 합성 로그 (개발·검증)
         ↓
-시간을 분 단위로 변환
+KdeSample (자정 기준 분)
         ↓
-Gaussian KDE
+Gaussian KDE (circular)
         ↓
-24시간 / 15분 Grid
+24시간 / 15분 Grid → 96-bin density
         ↓
-96-bin density
-        ↓
-Predictability
+meal_time 끼니 구간(peaks) + Predictability
         ↓
 MQTT Model Payload
         ↓
@@ -87,11 +85,13 @@ predictability ≈ 0.330
 → 아직 평소 활동 범위 안에 있음
 ```
 
-현재 Policy의 임시 기준:
+현재 Policy 기준 (`config/policy.toml` `[thresholds.meal] tail_max`):
 
 ```text
-TAIL_THRESHOLD = 0.05
+tail_max = 0.05
 ```
+
+식사는 하루 전체 분포가 아니라 **그 시각이 속한 끼니 구간 안에서** tail probability를 계산합니다.
 
 따라서:
 
@@ -120,13 +120,13 @@ KDE density의 Entropy를 이용해 사용자의 생활 패턴 규칙성을 계�
 predictability ≈ 0.330
 ```
 
-현재 Policy에는 임시로 다음 기준을 사용합니다.
+현재 Policy 기준 (`config/policy.toml` `predictability_min`):
 
 ```text
-PREDICTABILITY_THRESHOLD = 0.05
+meal = 0.20, wake = 0.05, hydration = 0.05
 ```
 
-단, 기존 KDE 정의에서 사용하던 threshold이므로
+단, 정규화 전 계산 기준으로 정한 값이므로
 24시간 / 96-bin 구조에 맞춰 재검증이 필요합니다.
 
 ## MQTT Model Payload
@@ -168,43 +168,39 @@ retain = true
 
 ## Context Engine Integration
 
-RPi5는 KDE payload를 수신해 최신 모델을 메모리에 저장합니다.
+RPi5는 KDE payload를 수신해 최신 모델을 메모리에 저장합니다 (retained라 재시작 후에도 복구).
 
 ```text
 hestia/model/kde
         ↓
 ContextEngine.ingest()
         ↓
-model_ingest.py
+messages.py (파싱·검증)
         ↓
-kde_model.py
+model.py ModelStore (분포·끼니 구간 보관)
         ↓
-ModelStore
+policy.py (tail probability / predictability 판정)
         ↓
-kde_context.py
+scenarios.py (MEAL_PROMPT 등)
 ```
 
 Policy는 다음 두 값을 사용합니다.
 
 ```text
-tail_probability
-predictability
+tail_probability   (식사는 끼니 구간 안에서 계산: model.peak_tail)
+predictability     (식사는 끼니별 predictability)
 ```
 
-현재 최소 Meal Policy:
+판정 순서:
 
-```python
-if (
-    tail_probability < TAIL_THRESHOLD
-    and predictability >= PREDICTABILITY_THRESHOLD
-):
-    candidate = True
-else:
-    candidate = False
+```text
+predictability < predictability_min → PATTERN_UNRELIABLE (개입 안 함)
+tail_probability >= tail_max        → TIME_NORMAL (개입 안 함)
+그 외                                → 개입 후보
 ```
 
-이 결과는 최종 Intervention이 아니라
-World State / FSM과 결합되기 전의 `intervention candidate`입니다.
+개입 후보는 Scenarios가 재실·외출·수면·식사 여부·야간 시간대(21:00~05:00)와 결합해
+실제 알림 여부를 정합니다.
 
 ## Replay Validation
 
@@ -240,30 +236,12 @@ reason = MEAL_TIME_NORMAL
 
 ## Test
 
-Context Engine 관련 테스트:
-
 ```bash
-python3 -m pytest tests/context-engine
+cd services/learning-engine && python3 -m pytest tests -q
+cd services/context-engine && python3 -m pytest tests -q
 ```
 
-현재 결과:
-
-```text
-20 passed
-```
-
-검증 항목:
-
-- KDE payload parsing
-- 96-bin validation
-- ModelStore
-- Model ingest
-- KDE Context 조회
-- Tail Probability
-- Predictability
-- Meal Policy
-- MQTT / Replay ingest routing
-- A/B Personalized Meal Scenario
+모듈별 테스트 수는 [`development-status.md`](development-status.md)를 참고하세요.
 
 ## 현재 구현 범위와 한계
 
@@ -286,9 +264,7 @@ holdout으로 분리해 오탐률과 누락률을 검증해야 합니다. 이는
 
 ## 다음 단계
 
-1. 실제 RPi4 → MQTT → RPi5 publish 및 retained 재수신 E2E 검증
-2. 실제 사용자 로그의 이벤트 품질·결측·confidence 집계
-3. 평일/주말, 재실/외출, 끼니 종류별 성능 비교
-4. 시간순 holdout 기반 predictability 및 알림 threshold 재검증
-5. 사용자별 baseline 영속 저장과 모델 갱신 이력 관리
-6. World State / FSM과 Meal Policy 통합
+1. 실제 사용자 로그의 이벤트 품질·결측·confidence 집계
+2. 평일/주말, 재실/외출, 끼니 종류별 성능 비교
+3. 시간순 holdout 기반 predictability 및 알림 threshold 재검증
+4. 사용자별 baseline 영속 저장과 모델 갱신 이력 관리

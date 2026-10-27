@@ -2,7 +2,7 @@
 
 ## Dataset
 
-현재 KDE Baseline 검증에는 **CASAS Aruba Smart Home Dataset**을 사용합니다.
+KDE Baseline 개발·검증에는 **CASAS Smart Home Dataset**을 사용합니다.
 
 Aruba는 1인 거주자의 장기간 스마트홈 센서 및 Activity Label 데이터로,
 사용자 개인의 생활 시간 패턴을 검증하기 위한 초기 데이터셋입니다.
@@ -27,7 +27,14 @@ tulum1.txt
 tulum2.txt
 ```
 
-현재 HESTIA에서는 `aruba.txt`를 사용합니다.
+HESTIA에서 쓰는 파일과 용도:
+
+| 파일 | 거주 | 용도 |
+|---|---|---|
+| `aruba.txt` | 1인 | 식사 KDE 기본 검증 (breakfast proxy, 식사 묶음), 수면·기상 proxy |
+| `milan.txt` | 1인 | 수면·기상 proxy, predictability 비교 (`casas.py`) |
+| `tulum2.txt` | 2인 | 수면·기상 proxy, predictability 비교 (`casas.py`) |
+| `cairo.txt` | 2인 | 수면·기상 proxy, predictability 비교 (`casas.py`) |
 
 ---
 
@@ -125,35 +132,16 @@ data/processed/aruba/breakfast_preparation.csv
 
 ## Data Version Control
 
-원본 및 전처리 데이터는 GitHub에 업로드하지 않습니다.
+CASAS 원본(`data/raw/`)은 GitHub에 업로드하지 않습니다 (`.gitignore`). 이 문서의 절차로 다시 받습니다.
 
-`.gitignore` 예시:
+저장소에 포함된 데이터:
 
-```gitignore
-data/raw/*
-!data/raw/.gitkeep
-
-data/processed/*
-!data/processed/.gitkeep
-```
-
-빈 폴더 구조만 유지하려면:
-
-```bash
-touch data/raw/.gitkeep
-touch data/processed/.gitkeep
-```
-
-GitHub에 포함하지 않는 파일 예시:
-
-```text
-new_labeled_data.zip
-aruba.txt
-meal_preparation.csv
-breakfast_preparation.csv
-```
-
-대신 이 문서의 절차를 통해 동일한 데이터를 다시 생성합니다.
+| 경로 | 내용 |
+|---|---|
+| `data/processed/aruba/meal_preparation.csv` | Aruba `Meal_Preparation begin` 추출 결과 |
+| `data/processed/aruba/breakfast_preparation.csv` | Breakfast proxy (기본 `baseline.py` 입력) |
+| `data/synthetic/p1_p2/p1_t0_log.jsonl`, `p2_t0_log.jsonl` | 합성 사용자 p1 / p2 의 91일 t0 로그 (Context Engine 형식) |
+| `data/synthetic/p1_p2.sqlite` | 위 합성 로그를 RPi4용 SQLite 이벤트 DB로 만든 것 (`scripts/datasets/build_synthetic_sqlite.py`) |
 
 ---
 

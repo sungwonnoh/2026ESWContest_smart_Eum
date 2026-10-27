@@ -1,5 +1,7 @@
 # Dataset Preprocessing
 
+> CASAS Aruba 전처리(1~2)와 합성 사용자 데이터 생성(3) 스크립트입니다.
+
 HESTIA의 개인 생활 패턴 Baseline 학습을 위해 CASAS Aruba 데이터를 전처리하는 스크립트입니다.
 
 ## 목적
@@ -118,3 +120,23 @@ HESTIA MVP에서는 다음 조건을 만족하는 이벤트를 아침 준비의 
 ```
 
 따라서 향후 실제 사용자 센서 데이터 또는 보다 세분화된 Activity Recognition 모델로 교체할 수 있습니다.
+
+## 3. 합성 사용자 데이터 (p1 / p2)
+
+실제 사용자 로그 대신 쓰는 합성 페르소나입니다. Context Engine t0 형식(`meal` / `sleep_start` / `sleep_end` / `hydration`)으로 만듭니다.
+
+| 페르소나 | 특징 |
+|---|---|
+| p1 | 78세 독거, 규칙적. 밤중 화장실 평균 1회, 마지막 2주는 2회 (야간뇨 증가 시연) |
+| p2 | 78세 독거, 야간뇨 없음. 아침을 거르고 점심(11시)·저녁(17시)만 먹음 (시연용) |
+
+```bash
+# JSONL 하나 (페르소나별)
+python3 services/learning-engine/synth_t0.py --persona p2 --output /tmp/p2_t0_log.jsonl
+
+# p1 / p2 JSONL + RPi4용 SQLite 이벤트 DB
+python3 scripts/datasets/build_synthetic_sqlite.py \
+    --output data/synthetic/p1_p2.sqlite --jsonl-dir data/synthetic/p1_p2
+```
+
+저장소에는 `data/synthetic/p1_p2/` (91일) 결과가 포함되어 있습니다.
