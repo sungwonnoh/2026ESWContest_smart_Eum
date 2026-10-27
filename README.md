@@ -115,3 +115,34 @@ Rule / FSM / 개인 Baseline을 결합해 최종 개입 여부를 판단합니�
 - HMM 기반 모호한 Activity 추론
 
 세부 진행 상황은 [`docs/development-status.md`](docs/development-status.md)를 참고하세요.
+
+---
+
+## License
+
+이 프로젝트의 소스코드는 [MIT License](LICENSE)로 공개합니다.
+누구나 자유롭게 사용·수정·재배포할 수 있으며, 저작권 표시와 라이선스 전문을 함께 포함해야 합니다.
+
+Copyright (c) 2026 HESTIA Team (sungwonnoh, kim-hawon)
+
+### Dataset
+
+- **CASAS Smart Home Dataset** (Aruba, Milan, Tulum2, Cairo) — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+  - 출처: https://zenodo.org/records/17180309
+  - `data/processed/` 의 Aruba 전처리 결과는 원본을 가공한 파생 데이터입니다.
+  - D. J. Cook, A. S. Crandall, B. L. Thomas, N. C. Krishnan, "CASAS: A Smart Home in a Box," *IEEE Computer*, 46(7), 62–69, 2013.
+- **합성 사용자 로그** (`data/synthetic/` p1 / p2) — 팀이 직접 생성한 데이터로, 소스코드와 같은 MIT License를 따릅니다.
+
+### Third-party Open Source
+
+아래 오픈소스를 의존성으로 사용하며, 각 라이브러리는 자체 라이선스를 따릅니다. 이 레포에 해당 소스는 포함하지 않습니다.
+
+| 영역 | 오픈소스 | 라이선스 |
+|---|---|---|
+| ESP32 펌웨어 | ArduinoJson, espMqttClient, Adafruit DHT sensor library, BH1750 | MIT |
+| Backend / 엔진 | FastAPI, pydantic | MIT |
+| Backend / 엔진 | uvicorn, httpx, NumPy, SciPy | BSD |
+| MQTT | paho-mqtt, Eclipse Mosquitto | EPL-2.0 / EDL-1.0 |
+| 앱 | Flutter, cupertino_icons | BSD-3-Clause / MIT |
+| 스마트플러그 | Tasmota (기기 펌웨어로만 사용, 코드 미포함) | GPL-3.0 |
+| TTS | eSpeak NG (RPi5 Docker 컨테이너에 패키지로 설치해 별도 프로그램으로 실행, 코드 미포함) | GPL-3.0-or-later |
