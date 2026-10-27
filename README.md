@@ -10,33 +10,29 @@ HESTIA는 센서와 생활 로그를 바탕으로 사용자의 현재 상태를 
 ## Architecture
 
 ```text
-ESP32
+ESP32 / Tasmota
   │
   │ Sensor / Device Event
   ▼
-MQTT Broker
-  │
-  ▼
 Raspberry Pi 5
-Context Engine
-  │
-  │ World State / Policy
-  │
-  ├───────────────┐
-  │               │
-  ▼               ▼
-External API   Raspberry Pi 4
-               Learning Engine
-                    │
-                    │ Personal Baseline
-                    │ KDE / HMM / Batch Learning
-                    ▼
-                  MQTT
+  ├─ MQTT Broker (Mosquitto)
+  ├─ Context Engine     World State / FSM / Policy / Notify
+  ├─ FastAPI Backend    App API, SQLite, Caregiver Telegram
+  ├─ TTS                Voice prompt
+  └─ Flutter App (IPK)
+  │                ▲
+  │ hestia/log/t0  │ hestia/model/kde (retained)
+  │                │ hestia/external/weather
+  ▼                │
+Raspberry Pi 4
+  ├─ t0 Logger          t0_log.jsonl
+  ├─ Learning Engine    KDE Batch Learning (daily 03:00)
+  └─ Weather Service
 ```
 
-- **ESP32**: 센서/가전 Mock 및 물리 입력
-- **Raspberry Pi 5**: MQTT Broker, Context Engine, 실시간 상태 추론 및 Policy 판단
-- **Raspberry Pi 4**: 사용자 History 저장, 개인별 Baseline 학습, 배치 처리, 향후 대시보드/TTS
+- **ESP32 / Tasmota**: 센서 수집, 가전 전력 측정 및 제어, 물리 입력
+- **Raspberry Pi 5**: MQTT Broker, Context Engine(실시간 상태 추론·Policy 판단·알림), FastAPI Backend, TTS 음성 안내, Flutter 앱
+- **Raspberry Pi 4**: t0 로그 수집, 개인별 KDE Baseline 배치 학습, 날씨 서비스
 - **MQTT**: 장치와 서비스 간 이벤트 및 모델 결과 전달
 
 ---
