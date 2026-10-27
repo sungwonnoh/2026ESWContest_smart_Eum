@@ -104,7 +104,7 @@ id = "vs-07"
 type = "power"
 area = "kitchen"
 roles = ["MEAL_HEAT"]
-source = "tasmota"
+source = "esp32"
 tasmota_topic = "Smartplug_D7034D"
 power_profile = "microwave"
 note = "전자레인지 — Tasmota 플러그. 이 펌웨어는 Topic 변경이 막혀 공장값을 쓴다"
@@ -135,7 +135,7 @@ id = "vs-10"
 type = "motion"
 area = "bedroom"
 roles = ["SLEEP"]
-source = "esp32"
+source = "mock"
 node = "esp32-1"
 note = "방문 PIR"
 
@@ -212,7 +212,7 @@ note = "배너 채널. remote_input 은 수면 판단의 핵심 신호"
 id = "vd-02"
 device_type = "smart_light"
 area = "living"
-source = "mock"
+source = "tasmota"
 channel = true
 note = "비언어 신호 채널"
 
@@ -251,7 +251,7 @@ note = "dispensed 는 시나리오 2·4 의 핵심 신호"
 id = "vd-07"
 device_type = "smart_light"
 area = "kitchen"
-source = "mock"
+source = "esp32"
 channel = true
 
 [[devices]]
@@ -266,7 +266,7 @@ note = "cycle_completed 후 vs-13 으로 수거 확인"
 id = "vd-09"
 device_type = "smart_light"
 area = "bedroom"
-source = "tasmota"
+source = "esp32"
 channel = true
 
 [[devices]]
