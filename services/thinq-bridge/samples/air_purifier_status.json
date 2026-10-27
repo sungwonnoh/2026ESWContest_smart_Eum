@@ -1,0 +1,19 @@
+{
+  "operation": { "airPurifierOperationMode": "POWER_ON" },
+  "airPurifierJobMode": { "currentJobMode": "AIRCLEAN" },
+  "airFlow": { "windStrength": "AUTO" },
+  "timer": {
+    "absoluteHourToStart": 9,
+    "absoluteMinuteToStart": 20,
+    "absoluteHourToStop": 22,
+    "absoluteMinuteToStop": 40
+  },
+  "airQualitySensor": {
+    "PM1": 8,
+    "PM2": 9,
+    "PM10": 10,
+    "oder": 1,
+    "humidity": 30,
+    "monitoringEnabled": "ON_WORKING"
+  }
+}
