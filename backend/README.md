@@ -264,7 +264,7 @@ Backend 는 Context Engine 이 발행한 context/notify 를 변환·저장·전�
 
 - `decision_id` ↔ `notify_id` 연결 방식 (위 참고)
 - Context Engine 이 `SENSOR_FAULT` 를 `notify/push` 로 발행하는지
-- 앱 ↔ `hestia/registry/devices` 동기화의 발행 주체: registry 는 RPi4 가 retained 로 발행하고
+- 앱 ↔ `hestia/registry/devices` 동기화의 발행 주체: 현재 저장소에는 registry 를 발행하는 코드가 없다.
   엔진은 수신 시 매핑 전체를 교체한다. FastAPI 출력 토픽(명세 17-A.4)에는 없으므로 정해질 때까지 발행하지 않는다.
 
 ## MQTT 구독 토픽
