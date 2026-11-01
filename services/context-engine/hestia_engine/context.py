@@ -378,12 +378,14 @@ class AwayEvaluator:
         timers: list[tuple[str, float]] = []
         factors: dict[str, Any] = {}
 
-        offline = self._world.offline_nodes()
-        factors["nodes_online"] = len(self._world.nodes) - len(offline)
+        offline_nodes = self._world.offline_nodes()
+        factors["nodes_online"] = len(self._world.nodes) - len(offline_nodes)
 
         # ① 센서 고장이 최우선. 재실 판단 자체를 믿을 수 없다.
+        offline = self._world.sensors_offline()
         if offline:
-            factors["offline_nodes"] = list(offline)
+            factors["offline_sensors"] = list(offline)
+            factors["offline_nodes"] = list(offline_nodes)
             fault_since = self._fault_since(offline, prev, now)
             return self._build("SENSOR_FAULT", "lwt_offline", fault_since, 1.0, factors, prev), timers
 
