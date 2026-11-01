@@ -57,7 +57,7 @@ id = "vs-03l"
 type = "light"
 area = "living"
 roles = ["LIVING"]
-source = "mock"
+source = "esp32"
 node = "esp32-1"
 note = "조도"
 
