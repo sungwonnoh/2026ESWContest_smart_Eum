@@ -21,12 +21,15 @@ struct FsrState {
     bool        occupied;
     uint32_t    lastRead;
     uint32_t    lastChange;
+    // 디버그 타이머는 센서마다 따로 들고 있어야 한다. 하나를 공유하면
+    // 먼저 도는 슬롯이 매번 타이머를 리셋해, 뒤에 도는 슬롯은 1초
+    // 조건을 영영 못 넘기고 한 줄도 찍히지 않는다.
+    uint32_t    lastDbg;
 };
 
 static FsrState states_[MAX_FSR];
 static uint8_t  count_    = 0;
 static bool     debug_    = false;
-static uint32_t lastDbg_  = 0;
 
 static FsrState* findState(const char* virtual_id) {
     for (uint8_t i = 0; i < count_; i++) {
@@ -66,6 +69,7 @@ void fsrBegin(const hestia::SensorSlot& slot) {
     st->pin        = slot.pin;
     st->lastRead   = 0;
     st->lastChange = millis();
+    st->lastDbg    = 0;
 
     uint16_t raw   = readAveraged(slot.pin);
     st->occupied   = (raw >= TH_ON);
@@ -81,8 +85,8 @@ void fsrTick(const hestia::SensorSlot& slot) {
 
     uint32_t t = millis();
 
-    if (debug_ && t - lastDbg_ >= DEBUG_PERIOD_MS) {
-        lastDbg_ = t;
+    if (debug_ && t - st->lastDbg >= DEBUG_PERIOD_MS) {
+        st->lastDbg = t;
         logInfo("FSR", "%s raw=%u (on>=%u off<=%u) occupied=%d",
                 st->id, readAveraged(st->pin), TH_ON, TH_OFF,
                 st->occupied ? 1 : 0);
@@ -113,7 +117,9 @@ void fsrResend(const hestia::SensorSlot& slot) {
 }
 
 void fsrSetDebug(bool on) {
-    debug_   = on;
-    lastDbg_ = 0;
+    debug_ = on;
+    for (uint8_t i = 0; i < count_; i++) {
+        states_[i].lastDbg = 0;
+    }
     logInfo("FSR", "debug %s", on ? "on" : "off");
 }
