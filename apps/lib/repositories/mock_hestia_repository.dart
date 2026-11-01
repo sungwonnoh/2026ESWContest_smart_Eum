@@ -363,9 +363,15 @@ class MockHestiaRepository implements HestiaRepository, DemoControls {
           const DeviceStatus(state: 'ON', attributes: {'targetTemp': 24}),
         DeviceType.airPurifier => const DeviceStatus(state: 'AUTO'),
         DeviceType.refrigerator => const DeviceStatus(state: 'ON'),
-        DeviceType.washer => const DeviceStatus(state: 'DONE'),
+        DeviceType.washer => const DeviceStatus(
+            state: 'RUNNING',
+            attributes: {'power': 'ON', 'cycle': 'SPIN', 'remain_min': 8}),
         DeviceType.waterPurifier => const DeviceStatus(state: 'STANDBY'),
-        DeviceType.robotCleaner => const DeviceStatus(state: 'STANDBY'),
+        DeviceType.robotCleaner => const DeviceStatus(
+            state: 'STANDBY',
+            attributes: {'status': 'DOCKED', 'battery': 100}),
+        DeviceType.cooktop => const DeviceStatus(
+            state: 'OFF', attributes: {'status': 'INITIAL'}),
         DeviceType.unknown => DeviceStatus.unknown,
       };
 

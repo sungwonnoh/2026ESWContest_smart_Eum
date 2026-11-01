@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/hestia_scope.dart';
 import '../../app/routes.dart';
 import '../../app/theme.dart';
+import '../../core/constants/app_config.dart';
 import '../../core/state/async_controller.dart';
 import '../../core/utils/display_labels.dart';
 import '../../core/utils/time_format.dart';
@@ -28,14 +31,21 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final HomeController _controller;
 
+  /// 가전·상황은 엔진이 바꾸므로 화면을 열어 둔 동안 주기적으로 다시 읽는다.
+  /// load 는 받아둔 데이터를 유지하므로 로딩 화면으로 깜빡이지 않는다.
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
     _controller = HomeController(HestiaScope.of(context).repository)..load();
+    _timer = Timer.periodic(
+        AppConfig.homeRefreshInterval, (_) => _controller.load());
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _controller.dispose();
     super.dispose();
   }

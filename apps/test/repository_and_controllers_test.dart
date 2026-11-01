@@ -53,6 +53,9 @@ void main() {
       expect(c.step, OnboardingStep.placement);
       expect(c.placements[DeviceType.tv], 'living');
       expect(c.placements[DeviceType.refrigerator], 'kitchen');
+      expect(c.placements[DeviceType.washer], 'utility');
+      expect(c.placements[DeviceType.robotCleaner], 'living');
+      expect(c.placements[DeviceType.cooktop], 'kitchen');
       expect(c.canProceed, isTrue);
     });
 
@@ -69,7 +72,7 @@ void main() {
     test('둘 수 있는 공간이 없으면 위치를 비워 두고 다음으로 갈 수 없다', () {
       final c = OnboardingController(newRepo())
         ..next()
-        ..toggleDevice(DeviceType.washer) // 다용도실 전용, 기본 공간에 없음
+        ..toggleRoom('utility') // 세탁기는 다용도실 전용
         ..next()
         ..next();
       expect(c.placements.containsKey(DeviceType.washer), isFalse);

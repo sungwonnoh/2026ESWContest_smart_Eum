@@ -18,12 +18,22 @@ class OnboardingController extends ChangeNotifier {
   final HestiaRepository _repository;
 
   OnboardingStep _step = OnboardingStep.welcome;
-  final Set<String> _roomIds = {'living', 'bedroom', 'kitchen', 'entrance'};
+  // 기본값은 config/homes/demo.toml 의 시연 배치를 따른다.
+  final Set<String> _roomIds = {
+    'living',
+    'bedroom',
+    'kitchen',
+    'utility',
+    'entrance',
+  };
   final Set<DeviceType> _devices = {
     DeviceType.tv,
     DeviceType.airConditioner,
     DeviceType.airPurifier,
     DeviceType.refrigerator,
+    DeviceType.washer,
+    DeviceType.robotCleaner,
+    DeviceType.cooktop,
   };
   final Map<DeviceType, String> _placements = {};
   UserPreferences _preferences = const UserPreferences();

@@ -12,6 +12,7 @@ enum DeviceType {
   washer('WASHER', '세탁기', ['utility']),
   waterPurifier('WATER_PURIFIER', '정수기', ['kitchen']),
   robotCleaner('ROBOT_CLEANER', '로봇청소기', ['living']),
+  cooktop('COOKTOP', '인덕션', ['kitchen']),
   unknown('UNKNOWN', '기타 가전', []);
 
   const DeviceType(this.wireName, this.label, this.allowedRoomIds);

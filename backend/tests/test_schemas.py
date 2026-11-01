@@ -52,8 +52,11 @@ def test_suppression_keeps_flags_without_confidence():
     ("smart_fridge", {"door": "CLOSED"}, "ON"),
     ("washer", {"power": "ON", "cycle": "SPIN"}, "RUNNING"),
     ("washer", {"power": "ON", "cycle": "DONE"}, "DONE"),
+    ("washer", {"power": "OFF", "cycle": "DONE"}, "OFF"),
     ("robot_cleaner", {"status": "CLEANING", "battery": 80}, "RUNNING"),
     ("robot_cleaner", {"status": "DOCKED"}, "STANDBY"),
+    ("cooktop", {"status": "COOK", "power_level": 5}, "RUNNING"),
+    ("cooktop", {"status": "INITIAL"}, "OFF"),
 ])
 def test_device_status_state(device_type, payload, state):
     status = to_status(device_type, envelope("vd-01", device_type=device_type, **payload))
