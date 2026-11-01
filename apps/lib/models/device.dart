@@ -42,8 +42,10 @@ enum DeviceType {
   bool get perRoom => this == light;
 
   /// 사용자가 고를 수 있는 가전 목록.
-  static List<DeviceType> get selectable =>
-      values.where((t) => t != unknown && !t.perRoom).toList();
+  /// 정수기는 앱에서 등록하지 않는다. 서버가 보내면 [waterPurifier]로 받아 표시만 한다.
+  static List<DeviceType> get selectable => values
+      .where((t) => t != unknown && t != waterPurifier && !t.perRoom)
+      .toList();
 
   /// [rooms] 에 자동으로 두는 가전. id 는 공간마다 고정이라 저장해도 상태가 이어진다.
   static List<Device> perRoomDevices(List<Room> rooms) => [

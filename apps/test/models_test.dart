@@ -175,6 +175,7 @@ void main() {
 
   test('조명은 고르지 않고 거실·주방·침실에 하나씩 둔다', () {
     expect(DeviceType.selectable, isNot(contains(DeviceType.light)));
+    expect(DeviceType.selectable, isNot(contains(DeviceType.waterPurifier)));
     final rooms = [
       for (final id in ['living', 'kitchen', 'bathroom'])
         RoomTemplate.byId(id)!.toRoom(),
