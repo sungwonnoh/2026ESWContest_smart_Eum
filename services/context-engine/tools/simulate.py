@@ -23,6 +23,7 @@ presence 는 20초마다 저절로 다시 나간다 (펌웨어 PERIOD_MS 와 같
 그게 없으면 손으로 쏠 때만 엔진이 깨어나, dwell·still_sec 같은
 지속 임계값이 시각이 지나도 안 걸린다 — activity.py 가 거기에
 타이머를 예약하지 않기 때문이다. 'heartbeat off' 로 끌 수 있다.
+가전 state 는 5분마다 같은 값으로 다시 나간다 (펌웨어 DEVICE_STATE_MS).
 
 점진 변화는 중간값을 보내지 않는다 — transition_ms 만큼 기다렸다가
 최종값 하나만 발행한다. 실제 기기도 대개 그렇고, 중간값이 오면
@@ -124,6 +125,9 @@ USAGE_CLOCK = """사용법: clock [시각|간격]
   점프 전에 idle 을 쳐라 — 수면 장면만 예외다."""
 
 RECONNECT_DELAY_SEC = 5.0   # 끊긴 뒤 재연결 간격
+# 가전 state 재발행 주기. 펌웨어 DEVICE_STATE_MS 와 같다. 바뀔 때만 쏘면
+# Backend 가 오래 그대로인 가전(세탁 완료, 충전대 대기)을 끊긴 것으로 본다.
+DEVICE_STATE_PERIOD_SEC = 300.0
 
 def _as_bool(token: str) -> bool | None:
     """true/false 를 읽는다. on/off, 1/0 도 받는다 — 손이 기억하는 말들이다."""
@@ -208,6 +212,7 @@ class Simulator:
         self._presence_last: dict[str, dict[str, Any]] = {}
         self._hb_period: float = 20.0      # 펌웨어 PERIOD_MS 와 같은 역할
         self._hb_next: float = time.time() + 20.0
+        self._dev_next: float = time.time() + DEVICE_STATE_PERIOD_SEC
 
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2, client_id=f"hestia-sim-{os.getpid()}"
@@ -272,6 +277,7 @@ class Simulator:
 
             self._apply_due()
             self._run_heartbeat()
+            self._run_device_heartbeat()
             self._run_script()
             self._drain_input()
 
@@ -490,6 +496,22 @@ class Simulator:
         self._hb_next = now + self._hb_period
         for vid, fields in self._presence_last.items():
             self._publish_sensor(vid, **fields)
+
+    def _run_device_heartbeat(self) -> None:
+        """가전 state 를 그대로 다시 쏜다. 펌웨어 devicesPublishAll 과 같다.
+
+        값이 같으므로 엔진에는 변화가 없다. Backend 의 online 판정
+        (마지막 수신 시각)만 이어진다. 'heartbeat off' 와 무관하다 —
+        그건 presence 로 엔진을 깨우는 쪽을 끄는 명령이다.
+        """
+        if not self._connected:
+            return
+        now = time.time()
+        if now < self._dev_next:
+            return
+        self._dev_next = now + DEVICE_STATE_PERIOD_SEC
+        for vid in self.devices:
+            self._publish_state(vid)
 
     def _heartbeat(self, args: list[str]) -> None:
         """heartbeat [초|off] — presence 재발행 주기. 기본 20초."""

@@ -159,6 +159,7 @@ abstract final class DeviceLabels {
         DeviceType.washer => Icons.local_laundry_service_rounded,
         DeviceType.waterPurifier => Icons.water_drop_rounded,
         DeviceType.robotCleaner => Icons.cleaning_services_rounded,
+        DeviceType.cooktop => Icons.soup_kitchen_rounded,
         DeviceType.unknown => Icons.devices_other_rounded,
       };
 
@@ -169,15 +170,68 @@ abstract final class DeviceLabels {
     'AUTO': '자동',
     'RUNNING': '동작 중',
     'DONE': '완료',
+    'ERROR': '오류',
     'UNKNOWN': '알 수 없음',
+  };
+
+  static const _washerCycles = {
+    'WASH': '세탁 중',
+    'RINSE': '헹굼 중',
+    'SPIN': '탈수 중',
+  };
+
+  static const _cleanerStatus = {
+    'CLEANING': '청소 중',
+    'RETURNING': '충전대로 복귀 중',
+    'DOCKED': '충전대 대기',
+    'PAUSED': '일시정지',
+    'ERROR': '오류',
+  };
+
+  static const _cooktopStatus = {
+    'COOK': '조리 중',
+    'PAUSE': '일시정지',
+    'LOCK': '잠금',
   };
 
   static String status(Device device) {
     if (!device.online) return '연결 끊김';
     final status = device.status;
+    final detail = _detail(device.type, status);
+    if (detail != null) return detail;
     final temp = status.attributes['targetTemp'];
     if (status.state == 'ON' && temp != null) return '$temp°C';
     return _states[status.state] ?? status.state;
+  }
+
+  /// 가전이 발행한 원래 값으로 고른 문구. 대표 state 만으로는
+  /// 세탁·헹굼·탈수나 청소·복귀가 구분되지 않는다. 없으면 null.
+  static String? _detail(DeviceType type, DeviceStatus status) {
+    final a = status.attributes;
+    switch (type) {
+      case DeviceType.washer:
+        if (status.state != 'RUNNING') return null;
+        final cycle = _washerCycles[a['cycle']];
+        final remain = a['remain_min'];
+        if (cycle == null) return null;
+        return remain is num && remain > 0 ? '$cycle · $remain분 남음' : cycle;
+      case DeviceType.robotCleaner:
+        final label = _cleanerStatus[a['status']];
+        final schedule = a['schedule'];
+        if (label != null && a['status'] == 'DOCKED' && schedule is String) {
+          return '$label · 예약 $schedule';
+        }
+        return label;
+      case DeviceType.cooktop:
+        final label = _cooktopStatus[a['status']];
+        final level = a['power_level'];
+        if (label != null && a['status'] == 'COOK' && level is num) {
+          return '$label · 화력 $level';
+        }
+        return label;
+      default:
+        return null;
+    }
   }
 
   static bool isActive(Device device) =>

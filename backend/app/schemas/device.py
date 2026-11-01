@@ -47,6 +47,7 @@ FLUTTER_TO_MQTT_TYPE: Dict[str, str] = {
     "WASHER": "washer",
     "WATER_PURIFIER": "water_purifier",
     "ROBOT_CLEANER": "robot_cleaner",
+    "COOKTOP": "cooktop",
 }
 MQTT_TO_FLUTTER_TYPE: Dict[str, str] = {v: k for k, v in FLUTTER_TO_MQTT_TYPE.items()}
 

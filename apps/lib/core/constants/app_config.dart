@@ -30,4 +30,7 @@ abstract final class AppConfig {
 
   /// 실시간 연결(Phase 3) 전까지 새 알림을 확인하는 주기.
   static const notificationPollInterval = Duration(seconds: 5);
+
+  /// 홈 화면이 상황·가전 상태를 다시 읽는 주기.
+  static const homeRefreshInterval = Duration(seconds: 10);
 }

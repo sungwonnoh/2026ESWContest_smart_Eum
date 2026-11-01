@@ -21,6 +21,13 @@ CLEANER_STATE = {
     "PAUSED": "STANDBY",
     "ERROR": "ERROR",
 }
+# 인덕션 status. LOCK 은 꺼진 채 잠근 것이다.
+COOKTOP_STATE = {
+    "INITIAL": "OFF",
+    "COOK": "RUNNING",
+    "PAUSE": "STANDBY",
+    "LOCK": "OFF",
+}
 
 
 def to_status(device_type: str | None, payload: dict[str, Any]) -> dict[str, Any]:
@@ -42,8 +49,11 @@ def to_status(device_type: str | None, payload: dict[str, Any]) -> dict[str, Any
     elif device_type == "smart_fridge":
         state = "ON"  # 항상 켜져 있음. 생존은 보고 주기로 판단한다.
     elif device_type == "washer":
+        # 꺼진 세탁기도 cycle 은 마지막 값(DONE)을 들고 있다. power 를 먼저 본다.
         cycle = attrs.get("cycle")
-        if cycle == "DONE":
+        if power == "OFF":
+            state = "OFF"
+        elif cycle == "DONE":
             state = "DONE"
         elif cycle in RUNNING_CYCLES:
             state = "RUNNING"
@@ -51,6 +61,8 @@ def to_status(device_type: str | None, payload: dict[str, Any]) -> dict[str, Any
             state = power or "UNKNOWN"
     elif device_type == "robot_cleaner":
         state = CLEANER_STATE.get(attrs.get("status", ""), "UNKNOWN")
+    elif device_type == "cooktop":
+        state = COOKTOP_STATE.get(attrs.get("status", ""), "UNKNOWN")
     else:
         state = power or "UNKNOWN"
 

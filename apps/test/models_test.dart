@@ -30,6 +30,42 @@ void main() {
       expect(status.attributes, {'targetTemp': 24});
       expect(status.toJson(), {'state': 'ON', 'targetTemp': 24});
     });
+
+    String label(String type, Map<String, dynamic> status) =>
+        DeviceLabels.status(Device.fromJson({
+          'id': 'x-01',
+          'name': '가전',
+          'type': type,
+          'roomId': 'living',
+          'status': status,
+          'online': true,
+        }));
+
+    test('세탁기는 발행된 cycle 과 남은 시간을 보여준다', () {
+      expect(
+        label('WASHER',
+            {'state': 'RUNNING', 'cycle': 'SPIN', 'remain_min': 8}),
+        '탈수 중 · 8분 남음',
+      );
+      expect(label('WASHER', {'state': 'RUNNING', 'cycle': 'RINSE'}), '헹굼 중');
+      expect(label('WASHER', {'state': 'DONE', 'cycle': 'DONE'}), '완료');
+      expect(label('WASHER', {'state': 'OFF', 'cycle': 'DONE'}), '꺼짐');
+    });
+
+    test('청소기·인덕션은 발행된 status 를 보여준다', () {
+      expect(label('ROBOT_CLEANER', {'state': 'RUNNING', 'status': 'RETURNING'}),
+          '충전대로 복귀 중');
+      expect(
+        label('ROBOT_CLEANER',
+            {'state': 'STANDBY', 'status': 'DOCKED', 'schedule': '10:00'}),
+        '충전대 대기 · 예약 10:00',
+      );
+      expect(
+        label('COOKTOP', {'state': 'RUNNING', 'status': 'COOK', 'power_level': 5}),
+        '조리 중 · 화력 5',
+      );
+      expect(label('COOKTOP', {'state': 'OFF', 'status': 'INITIAL'}), '꺼짐');
+    });
   });
 
   test('명세 예시 Current Context 응답을 파싱한다', () {
@@ -133,10 +169,13 @@ void main() {
     );    
     expect(ids(DeviceType.washer), ['utility']);
     expect(ids(DeviceType.waterPurifier), ['kitchen']);
+    expect(ids(DeviceType.robotCleaner), ['living']);
+    expect(ids(DeviceType.cooktop), ['kitchen']);
   });
 
   test('조명은 고르지 않고 거실·주방·침실에 하나씩 둔다', () {
     expect(DeviceType.selectable, isNot(contains(DeviceType.light)));
+    expect(DeviceType.selectable, isNot(contains(DeviceType.waterPurifier)));
     final rooms = [
       for (final id in ['living', 'kitchen', 'bathroom'])
         RoomTemplate.byId(id)!.toRoom(),
