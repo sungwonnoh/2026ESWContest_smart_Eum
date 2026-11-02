@@ -280,6 +280,7 @@ void setup() {
     #endif
 
     if (displayId_ != nullptr) {
+        displayBegin();
         logInfo("BOOT", "display_node = %s", displayId_);
     }
 
@@ -307,6 +308,7 @@ void loop() {
 
     mqtt.tick();
     consoleTick();
+    displayTick();
 
     #ifdef ACK_BUTTON_PIN
     if (buttonPressed(ackBtn_)) {
