@@ -48,7 +48,7 @@ std::string buildDisplayState(const char* src_id, uint32_t seq, uint32_t sent_ts
 
 class SeqCounter {
 public:
-    static const uint8_t MAX_IDS = 12;
+    static const uint8_t MAX_IDS = 16;
 
     SeqCounter();
     
