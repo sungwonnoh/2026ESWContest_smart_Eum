@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../network/hestia_exception.dart';
@@ -13,6 +15,9 @@ abstract class AsyncController<T> extends ChangeNotifier {
   T? _data;
   String? _message;
   bool _disposed = false;
+  int _lastStarted = 0;
+  int _lastApplied = 0;
+  StreamSubscription<void>? _changes;
 
   LoadStatus get status => _status;
   T? get data => _data;
@@ -27,28 +32,46 @@ abstract class AsyncController<T> extends ChangeNotifier {
   @protected
   bool isEmptyData(T data) => false;
 
+  /// 서버 변경 신호가 올 때마다 다시 읽는다. 구독은 dispose 때 끊는다.
+  void follow(Stream<void> changes) {
+    _changes?.cancel();
+    _changes = changes.listen((_) => load());
+  }
+
   Future<void> load() async {
+    final request = ++_lastStarted;
     if (_data == null && _status != LoadStatus.loading) {
       _status = LoadStatus.loading;
       _notify();
     }
     try {
       final result = await fetch();
+      if (_isStale(request)) return;
       _data = result;
       _message = null;
       _status = isEmptyData(result) ? LoadStatus.empty : LoadStatus.success;
     } on HestiaOfflineException catch (e) {
+      if (_isStale(request)) return;
       _status = LoadStatus.offline;
       _message = e.message;
     } on HestiaException catch (e) {
+      if (_isStale(request)) return;
       _status = LoadStatus.error;
       _message = e.message;
     } catch (e) {
+      if (_isStale(request)) return;
       _status = LoadStatus.error;
       _message = '알 수 없는 오류가 발생했습니다.';
       debugPrint('AsyncController.load failed: $e');
     }
     _notify();
+  }
+
+  /// 동시에 읽을 때 늦게 도착한 옛 응답이 새 값을 덮지 않게 한다.
+  bool _isStale(int request) {
+    if (request < _lastApplied) return true;
+    _lastApplied = request;
+    return false;
   }
 
   /// 로컬에서 바뀐 데이터를 반영한다 (예: 알림 확인 처리).
@@ -68,6 +91,7 @@ abstract class AsyncController<T> extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _changes?.cancel();
     super.dispose();
   }
 }

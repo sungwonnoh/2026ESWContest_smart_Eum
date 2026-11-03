@@ -108,7 +108,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | PUT/DELETE | `/api/v1/medications/{id}` | 복약 일정 수정/삭제 (없으면 404, 삭제는 204) |
 | GET | `/api/v1/weather` | 외부 날씨 최신값 (아직 못 받았으면 404) |
 | POST | `/api/v1/caregiver/summary` | 지정 기간의 생활 요약을 생성하고 Telegram으로 즉시 전송 |
-| WS | `/ws/monitor` | 접속 시 `snapshot`, 이후 MQTT 이벤트 실시간 전달 |
+| WS | `/ws/monitor` | 접속 시 `snapshot`, 이후 MQTT 이벤트와 REST 변경(`data_changed`) 실시간 전달 |
 
 ### 가전 ↔ MQTT 장치 연결
 

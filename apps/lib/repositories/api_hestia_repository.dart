@@ -12,12 +12,13 @@ import '../models/room.dart';
 import '../models/user_preferences.dart';
 import '../models/weather.dart';
 import '../services/api_client.dart';
+import '../services/realtime_client.dart';
 import 'hestia_repository.dart';
 
 /// HESTIA FastAPI(`/api/v1`) 기반 Repository.
 ///
 /// Mock과 같은 인터페이스를 구현하므로 Widget/Controller는 바뀌지 않는다.
-/// 새 알림 실시간 수신(Phase 3) 전까지는 목록을 주기적으로 다시 읽어 흉내 낸다.
+/// 변경은 WS /ws/monitor 로 바로 알아채고, 주기 조회는 연결이 끊겼을 때를 대비해 둔다.
 class ApiHestiaRepository implements HestiaRepository {
   ApiHestiaRepository(
     this._client, {
@@ -169,6 +170,56 @@ class ApiHestiaRepository implements HestiaRepository {
   @override
   Stream<HestiaNotification> watchNotifications() => _incoming.stream;
 
+  /// 화면에 보이는 값을 바꾸는 이벤트. 잦은 센서 원본처럼 화면과 무관한 것은 뺀다.
+  static const _changeEvents = {
+    'snapshot', // 접속 직후 — 끊긴 동안 놓친 변경을 다시 읽는다
+    'context_update',
+    'device_state',
+    'registry_update',
+    'weather_update',
+    'notification',
+    'notification_ack',
+    'notification_cancel',
+    'data_changed',
+  };
+
+  /// 이벤트가 몰려도 이 간격에 한 번만 다시 읽는다.
+  static const _changeWindow = Duration(milliseconds: 200);
+
+  late final RealtimeClient _realtime = RealtimeClient(
+    url: _client.baseUri.resolve('ws/monitor').replace(
+          scheme: _client.baseUri.scheme == 'https' ? 'wss' : 'ws',
+        ),
+    timeout: _client.timeout,
+    onEvent: _onRealtimeEvent,
+  );
+  late final StreamController<void> _changes =
+      StreamController<void>.broadcast(
+    onListen: () => _realtime.start(),
+    onCancel: () => _realtime.stop(),
+  );
+  Timer? _changeTimer;
+  bool _pollAgain = false;
+
+  @override
+  Stream<void> watchChanges() => _changes.stream;
+
+  void _onRealtimeEvent(String type) {
+    if (!_changeEvents.contains(type)) return;
+    if (type == 'notification') {
+      // 배너를 다음 주기까지 기다리지 않는다.
+      if (_polling) {
+        _pollAgain = true;
+      } else {
+        _poll();
+      }
+    }
+    _changeTimer ??= Timer(_changeWindow, () {
+      _changeTimer = null;
+      if (!_changes.isClosed) _changes.add(null);
+    });
+  }
+
   void _startPolling() {
     _timer ??= Timer.periodic(pollInterval, (_) => _poll());
     _poll();
@@ -195,12 +246,19 @@ class ApiHestiaRepository implements HestiaRepository {
       // 연결이 끊겼다. 다음 주기에 다시 시도한다.
     } finally {
       _polling = false;
+      if (_pollAgain && !_incoming.isClosed) {
+        _pollAgain = false;
+        _poll();
+      }
     }
   }
 
   void dispose() {
     _stopPolling();
     _incoming.close();
+    _realtime.stop();
+    _changeTimer?.cancel();
+    _changes.close();
     _client.close();
   }
 

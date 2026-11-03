@@ -31,14 +31,18 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final HomeController _controller;
 
-  /// 가전·상황은 엔진이 바꾸므로 화면을 열어 둔 동안 주기적으로 다시 읽는다.
+  /// 가전·상황은 엔진이 바꾸므로 변경 신호가 오면 바로 다시 읽는다.
+  /// 타이머는 실시간 연결이 끊겼을 때를 대비해 둔다.
   /// load 는 받아둔 데이터를 유지하므로 로딩 화면으로 깜빡이지 않는다.
   Timer? _timer;
 
   @override
   void initState() {
     super.initState();
-    _controller = HomeController(HestiaScope.of(context).repository)..load();
+    final repository = HestiaScope.of(context).repository;
+    _controller = HomeController(repository)
+      ..load()
+      ..follow(repository.watchChanges());
     _timer = Timer.periodic(
         AppConfig.homeRefreshInterval, (_) => _controller.load());
   }

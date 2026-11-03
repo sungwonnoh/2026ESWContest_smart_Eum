@@ -27,3 +27,17 @@ def test_monitor_sends_snapshot_then_live_events(hestia):
         assert event["device_state"]["vd-01"]["power"] == "ON"
 
     assert hestia.container.monitor.client_count == 0
+
+
+def test_monitor_announces_rest_writes_only(hestia):
+    room = {"id": "living", "name": "거실", "roles": ["LIVING"]}
+    with hestia.client.websocket_connect("/ws/monitor") as ws:
+        assert ws.receive_json()["type"] == "snapshot"
+
+        assert hestia.get("/rooms").status_code == 200
+        assert hestia.post("/rooms", json={"name": ""}).status_code >= 400
+
+        assert hestia.post("/rooms", json=room).status_code == 201
+        event = ws.receive_json()  # 앞의 GET·실패한 POST 는 이벤트가 없다
+        assert event["type"] == "data_changed"
+        assert event["data"] == {"method": "POST", "path": "/api/v1/rooms"}

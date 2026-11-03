@@ -52,10 +52,13 @@ class _ExplanationPageState extends State<ExplanationPage> {
   @override
   void initState() {
     super.initState();
-    _controller = ExplanationController(
-      HestiaScope.of(context).repository,
-      widget.explanationId,
-    )..load();
+    final repository = HestiaScope.of(context).repository;
+    _controller = ExplanationController(repository, widget.explanationId)
+      ..load();
+    // 특정 판단의 근거는 바뀌지 않는다. 최신 판단을 볼 때만 따라간다.
+    if (widget.explanationId == null) {
+      _controller.follow(repository.watchChanges());
+    }
   }
 
   @override
