@@ -15,7 +15,9 @@ import argparse
 import json
 import logging
 import os
+import queue
 import signal
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -32,10 +34,18 @@ WEATHER_TOPIC = "hestia/external/weather"
 GET_TOPIC = "hestia/external/weather/get"
 DEMO_TOPIC = "hestia/external/weather/demo"
 
-LOOP_TIMEOUT_SEC = 0.5
+TICK_INTERVAL_SEC = 0.5
+RECONNECT_MIN_DELAY_SEC = 1
+RECONNECT_MAX_DELAY_SEC = 30
 
 
 class Runner:
+    """MQTT 네트워크는 paho 스레드(loop_start)가, 날씨 조회와 발행 판단은 run() 이 맡는다.
+
+    콜백은 신호만 남기고 WeatherService 는 run() 쪽에서만 만진다. 기상청 조회가
+    느려도 keepalive 가 밀리지 않고, 브로커가 죽어도 조회가 멈추지 않는다.
+    """
+
     def __init__(
         self,
         service: WeatherService,
@@ -50,60 +60,65 @@ class Runner:
         self._port = port
         self._clock = clock
         self._running = False
-        self._requested = False
-        self._demo: dict | None = None          # 받은 시연 명령. 루프에서 적용한다
+        self._requested = threading.Event()     # get 을 받음. 응답은 루프에서
+        self._resend = threading.Event()        # (재)연결됨. 캐시 재발행은 루프에서
+        self._demo: queue.SimpleQueue[dict] = queue.SimpleQueue()   # 받은 시연 명령
+        self._connect_fail_logged = False       # 재시도마다 찍지 않게 끊긴 동안 한 번만
         self.client = client or self._make_client()
 
     # ------------------------------------------------------------ 생애
 
     def start(self) -> None:
-        """브로커(RPi5)가 늦게 떠도 루프에서 재연결한다."""
+        """브로커(RPi5)가 늦게 떠도, 나중에 끊겨도 paho 스레드가 다시 붙는다."""
         self._running = True
-        try:
-            self.client.connect(self._host, self._port, keepalive=60)
-            log.info("브로커 연결: %s:%s", self._host, self._port)
-        except OSError as exc:
-            log.warning("브로커 연결 실패 (%s) — 루프에서 재시도한다", exc)
-            self.client.connect_async(self._host, self._port, keepalive=60)
+        log.info("브로커 연결 시작: %s:%s", self._host, self._port)
+        self.client.connect_async(self._host, self._port, keepalive=60)
+        self.client.loop_start()
 
     def run(self) -> None:
         self.start()
-        while self._running:
-            try:
-                self.client.loop(timeout=LOOP_TIMEOUT_SEC)
-                self.tick()
-            except Exception:                         # noqa: BLE001
-                # 한 번의 예외로 서비스가 멈추면 안 된다
-                log.exception("루프 예외 — 계속한다")
-                time.sleep(LOOP_TIMEOUT_SEC)
+        try:
+            while self._running:
+                try:
+                    self.tick()
+                except Exception:                     # noqa: BLE001
+                    # 한 번의 예외로 서비스가 멈추면 안 된다
+                    log.exception("루프 예외 — 계속한다")
+                time.sleep(TICK_INTERVAL_SEC)
+        finally:
+            self._shutdown()
 
     def stop(self) -> None:
-        if not self._running:
-            return
+        """시그널 핸들러에서도 부른다. 표시만 하고 정리는 run() 이 끝나면서 한다."""
         self._running = False
+
+    def _shutdown(self) -> None:
         log.info("종료")
         try:
             self.client.disconnect()
+            self.client.loop_stop()
         except Exception:                             # noqa: BLE001
             log.warning("종료 중 예외", exc_info=True)
 
     def tick(self) -> None:
         """조회할 때가 됐으면 조회하고(새 내용이면 발행), 요청이 있었으면 응답한다."""
         now = self._clock()
+        resend = _take(self._resend)
+        changed = False
 
-        if self._demo is not None:
-            cmd, self._demo = self._demo, None
-            if self.service.set_demo(bool(cmd.get("heat")), now, float(cmd.get("ttl_sec") or DEMO_TTL_SEC)):
-                self._publish(reason="update")
+        while not self._demo.empty():
+            cmd = self._demo.get_nowait()
+            changed |= self.service.set_demo(bool(cmd.get("heat")), now, float(cmd.get("ttl_sec") or DEMO_TTL_SEC))
 
-        if self.service.demo_expired(now):
+        changed |= self.service.demo_expired(now)
+
+        if self.service.due(now):
+            changed |= self.service.poll(now)
+
+        if changed or (resend and self.service.cache is not None):
             self._publish(reason="update")
 
-        if self.service.due(now) and self.service.poll(now):
-            self._publish(reason="update")
-
-        if self._requested:
-            self._requested = False
+        if _take(self._requested):
             if self.service.reply(now):
                 self._publish(reason="reply")
             else:
@@ -119,20 +134,28 @@ class Runner:
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
-        client.reconnect_delay_set(min_delay=1, max_delay=30)
+        client.on_connect_fail = self._on_connect_fail
+        client.reconnect_delay_set(min_delay=RECONNECT_MIN_DELAY_SEC, max_delay=RECONNECT_MAX_DELAY_SEC)
+        # 콜백 예외가 네트워크 스레드를 죽이면 재연결도 함께 멈춘다. 로그만 남기고 계속한다
+        client.suppress_exceptions = True
+        client.enable_logger(log)
         return client
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
-        """(재)연결될 때마다 구독. 끊긴 동안 놓친 새 실황이 있을 수 있어 캐시를 한 번 보낸다."""
+        """(재)연결될 때마다 구독. 끊긴 동안 보내지 못한 실황이 있을 수 있어 캐시를 한 번 보낸다."""
         if reason_code != 0:
             log.warning("연결 거부 rc=%s", reason_code)
             return
         client.subscribe(GET_TOPIC, qos=1)
         client.subscribe(DEMO_TOPIC, qos=1)
         log.info("연결됨 — 구독 %s, %s", GET_TOPIC, DEMO_TOPIC)
+        self._connect_fail_logged = False
+        self._resend.set()
 
-        if self.service.cache is not None:
-            self._publish(reason="update")
+    def _on_connect_fail(self, client, userdata) -> None:
+        if not self._connect_fail_logged:
+            self._connect_fail_logged = True
+            log.warning("브로커 연결 실패 %s:%s — 계속 재시도한다", self._host, self._port)
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
         if self._running:
@@ -144,7 +167,7 @@ class Runner:
             log.warning("retained 요청 무시: %s", msg.topic)
             return
         if msg.topic == GET_TOPIC:
-            self._requested = True              # 응답은 루프(tick)에서 — 콜백에서 HTTP 를 부르지 않는다
+            self._requested.set()               # 응답은 루프(tick)에서 — 콜백에서 HTTP 를 부르지 않는다
         elif msg.topic == DEMO_TOPIC:
             try:
                 cmd = json.loads(msg.payload)
@@ -152,13 +175,26 @@ class Runner:
                 log.warning("시연 명령 형식 오류: %r", msg.payload)
                 return
             if isinstance(cmd, dict):
-                self._demo = cmd
+                self._demo.put(cmd)
 
     def _publish(self, *, reason: str) -> None:
+        # paho 는 끊긴 동안의 QoS 1 을 쌓아 뒀다 한꺼번에 보낸다. 지난 날씨는 쌓지 않고
+        # 다시 연결될 때 _resend 로 최신 값만 보낸다.
+        if not self.client.is_connected():
+            log.info("브로커 연결 없음 — 발행 건너뜀 (%s)", reason)
+            return
         payload = self.service.payload(reason=reason, now=self._clock())
         info = self.client.publish(WEATHER_TOPIC, json.dumps(payload, ensure_ascii=False), qos=1, retain=False)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             log.warning("발행 실패 rc=%s (%s)", info.rc, reason)
+
+
+def _take(flag: threading.Event) -> bool:
+    """신호를 읽고 지운다. 지운 뒤에 온 신호는 다음 tick 이 본다."""
+    if not flag.is_set():
+        return False
+    flag.clear()
+    return True
 
 
 # ==================================================================== 조립

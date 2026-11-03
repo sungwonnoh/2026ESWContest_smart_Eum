@@ -30,6 +30,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.published: list[tuple[str, dict, int, bool]] = []
         self.subscribed: list[str] = []
+        self.connected = True
 
     def publish(self, topic, payload, qos=0, retain=False):
         self.published.append((topic, json.loads(payload), qos, retain))
@@ -37,6 +38,9 @@ class FakeClient:
 
     def subscribe(self, topic, qos=0):
         self.subscribed.append(topic)
+
+    def is_connected(self):
+        return self.connected
 
 
 class Clock:
@@ -128,7 +132,27 @@ def test_reconnect_subscribes_and_resends_cache():
 
     runner.tick()
     runner._on_connect(client, None, None, 0, None)
+    runner.tick()                           # 재발행은 콜백이 아니라 루프에서 한다
     assert [p[1]["reason"] for p in client.published] == ["update", "update"]
+
+
+def test_while_disconnected_nothing_is_queued_and_latest_is_sent_on_reconnect():
+    fake = FakeKma({"1400": ncst_response("20261010", "1400"), "1500": ncst_response("20261010", "1500", T1H="30.0")})
+    runner, client, clock = make(fake, kst(2026, 10, 10, 14, 20))
+    runner.tick()
+    assert len(client.published) == 1
+
+    client.connected = False
+    clock.t = kst(2026, 10, 10, 15, 15)     # 끊긴 동안 새 실황 — 조회는 계속한다
+    runner.tick()
+    assert len(fake.ncst_urls()) == 2
+    assert len(client.published) == 1
+
+    client.connected = True
+    runner._on_connect(client, None, None, 0, None)
+    runner.tick()
+    assert len(client.published) == 2
+    assert client.published[-1][1]["temperature_c"] == 30.0
 
 
 # ==================================================================== 시연

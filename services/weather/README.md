@@ -118,6 +118,24 @@ sudo systemctl enable --now hestia-weather
 journalctl -u hestia-weather -f
 ```
 
+### Docker로 실행 (Atlas OS)
+
+패키지는 이미지를 빌드할 때 설치하므로 컨테이너를 재시작해도 다시 설치하지 않습니다. 코드를 바꾸면 이미지를 다시 빌드합니다.
+
+```bash
+docker build --network host -t hestia-weather:latest services/weather
+
+docker run -d --name hestia-weather \
+  --network host \
+  --security-opt apparmor=unconfined \
+  --restart unless-stopped \
+  --env-file /data/hestia-weather.env \
+  -v /data/hestia/config:/data/hestia/config:ro \
+  hestia-weather:latest
+```
+
+브로커 주소는 env 파일의 `MQTT_HOST`로 정합니다. 연결이 끊기면 1초부터 최대 30초 간격으로 다시 붙으므로 컨테이너를 재시작할 필요가 없습니다.
+
 RPi5에서 확인:
 
 ```bash

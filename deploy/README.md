@@ -45,3 +45,4 @@ sudo systemctl start hestia-learning           # 지금 바로 한 번 실행
 
 - `hestia-weather.service`: `python3 -m hestia_weather.runner` 상시 실행, `hestia/external/weather` 발행
 - 환경변수는 `weather.env.example` 참고. 자세한 내용은 [`services/weather/README.md`](../services/weather/README.md)
+- Atlas OS 처럼 systemd 설치 대신 Docker 로 돌릴 때의 빌드·실행 명령도 같은 문서에 있다
