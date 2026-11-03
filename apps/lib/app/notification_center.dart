@@ -10,6 +10,7 @@ import '../repositories/hestia_repository.dart';
 class NotificationCenter extends AsyncController<List<HestiaNotification>> {
   NotificationCenter(this._repository) {
     _subscription = _repository.watchNotifications().listen(_onIncoming);
+    follow(_repository.watchChanges());
   }
 
   final HestiaRepository _repository;

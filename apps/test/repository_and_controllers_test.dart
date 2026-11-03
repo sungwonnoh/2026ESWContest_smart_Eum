@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hestia_flutter/app/notification_center.dart';
@@ -9,7 +11,51 @@ import 'package:hestia_flutter/repositories/mock_hestia_repository.dart';
 
 MockHestiaRepository newRepo() => MockHestiaRepository(latency: Duration.zero);
 
+class _GatedController extends AsyncController<int> {
+  final gates = <Completer<int>>[];
+
+  @override
+  Future<int> fetch() {
+    final gate = Completer<int>();
+    gates.add(gate);
+    return gate.future;
+  }
+}
+
 void main() {
+  group('AsyncController', () {
+    test('늦게 도착한 옛 응답은 새 값을 덮지 않는다', () async {
+      final c = _GatedController();
+      final older = c.load();
+      final newer = c.load();
+
+      c.gates[1].complete(2);
+      await newer;
+      c.gates[0].complete(1);
+      await older;
+
+      expect(c.data, 2);
+    });
+
+    test('follow 는 신호마다 다시 읽고 dispose 하면 멈춘다', () async {
+      final c = _GatedController();
+      final changes = StreamController<void>();
+      c.follow(changes.stream);
+
+      changes.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.gates, hasLength(1));
+      c.gates[0].complete(1);
+      await Future<void>.delayed(Duration.zero);
+
+      c.dispose();
+      changes.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(c.gates, hasLength(1));
+      await changes.close();
+    });
+  });
+
   group('MockHestiaRepository', () {
     test('처음에는 설정이 없다', () async {
       expect(await newRepo().getSetup(), isNull);

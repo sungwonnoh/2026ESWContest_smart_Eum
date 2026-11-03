@@ -203,4 +203,92 @@ void main() {
 
     await sub.cancel();
   });
+
+  group('실시간 변경 신호', () {
+    Future<void> settle() =>
+        Future<void>.delayed(const Duration(milliseconds: 350));
+
+    test('접속하면 놓친 변경을 읽도록 신호를 보낸다', () async {
+      final changes = <void>[];
+      final sub = repo.watchChanges().listen(changes.add);
+      await settle();
+      expect(changes, hasLength(1));
+      await sub.cancel();
+    });
+
+    test('화면과 무관한 이벤트는 무시하고, 몰린 이벤트는 한 번으로 묶는다', () async {
+      final changes = <void>[];
+      final sub = repo.watchChanges().listen(changes.add);
+      await settle();
+      changes.clear();
+
+      api.pushEvent('sensor_state');
+      await settle();
+      expect(changes, isEmpty);
+
+      api
+        ..pushEvent('device_state')
+        ..pushEvent('context_update')
+        ..pushEvent('data_changed');
+      await settle();
+      expect(changes, hasLength(1));
+
+      await sub.cancel();
+    });
+
+    test('notification 이벤트가 오면 주기를 기다리지 않고 새 알림을 낸다', () async {
+      final slow = ApiHestiaRepository(
+        ApiClient(baseUrl: 'http://127.0.0.1:${api.port}'),
+        pollInterval: const Duration(hours: 1),
+      );
+      addTearDown(slow.dispose);
+      api.routes['GET /api/v1/notifications'] = (200, [notificationJson]);
+      final received = <HestiaNotification>[];
+      final subs = [
+        slow.watchNotifications().listen(received.add),
+        slow.watchChanges().listen((_) {}),
+      ];
+      await settle();
+
+      api.routes['GET /api/v1/notifications'] = (200, [
+        {...notificationJson, 'id': 'n-002'},
+        notificationJson,
+      ]);
+      api.pushEvent('notification');
+      await settle();
+      expect(received.map((n) => n.id), ['n-002']);
+
+      for (final sub in subs) {
+        await sub.cancel();
+      }
+    });
+
+    test('연결이 끊기면 다시 붙어 신호를 보낸다', () async {
+      final fast = ApiHestiaRepository(
+        ApiClient(baseUrl: 'http://127.0.0.1:${api.port}'),
+      );
+      addTearDown(fast.dispose);
+      final changes = <void>[];
+      final sub = fast.watchChanges().listen(changes.add);
+      await settle();
+      changes.clear();
+
+      await api.dropSockets();
+      await Future<void>.delayed(const Duration(seconds: 4));
+      expect(api.socketCount, 1);
+      expect(changes, hasLength(1));
+
+      await sub.cancel();
+    });
+
+    test('구독이 모두 끝나면 연결을 닫는다', () async {
+      final sub = repo.watchChanges().listen((_) {});
+      await settle();
+      expect(api.socketCount, 1);
+
+      await sub.cancel();
+      await settle();
+      expect(api.socketCount, 0);
+    });
+  });
 }

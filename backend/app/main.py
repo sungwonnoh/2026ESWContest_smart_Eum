@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from .api import (caregiver, context, devices, explanations, health, medications,
                   notifications, preferences, rooms, setup, weather)
@@ -22,6 +23,7 @@ from .dependencies import build_container
 from .realtime import monitor_ws
 
 API_PREFIX = "/api/v1"
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def create_app(settings: Optional[Settings] = None, mqtt: Any = None) -> FastAPI:
@@ -52,6 +54,21 @@ def create_app(settings: Optional[Settings] = None, mqtt: Any = None) -> FastAPI
                    explanations, preferences, setup, medications, weather):
         app.include_router(module.router, prefix=API_PREFIX)
     app.include_router(monitor_ws.router)
+
+    @app.middleware("http")
+    async def announce_writes(request: Request, call_next):
+        """REST 로 바꾼 값은 MQTT 를 거치지 않으므로 여기서 Monitor 로 알린다."""
+        response = await call_next(request)
+        if (request.method in WRITE_METHODS and response.status_code < 400
+                and request.url.path.startswith(API_PREFIX)):
+            app.state.hestia.monitor.publish({
+                "type": "data_changed",
+                "sent_ts": int(time.time()),
+                "topic": None,
+                "data": {"method": request.method, "path": request.url.path},
+            })
+        return response
+
     return app
 
 

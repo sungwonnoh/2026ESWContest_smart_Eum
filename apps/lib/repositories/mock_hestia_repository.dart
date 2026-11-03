@@ -181,6 +181,10 @@ class MockHestiaRepository implements HestiaRepository, DemoControls {
   Stream<HestiaNotification> watchNotifications() =>
       _notificationController.stream;
 
+  /// 서버가 없으니 다른 곳에서 바뀌는 데이터도 없다.
+  @override
+  Stream<void> watchChanges() => const Stream.empty();
+
   // ---------------------------------------------------------------- explain
 
   @override

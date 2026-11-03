@@ -24,8 +24,10 @@ class _MedicationListPageState extends State<MedicationListPage> {
   @override
   void initState() {
     super.initState();
-    _controller =
-        MedicationListController(HestiaScope.of(context).repository)..load();
+    final repository = HestiaScope.of(context).repository;
+    _controller = MedicationListController(repository)
+      ..load()
+      ..follow(repository.watchChanges());
   }
 
   @override

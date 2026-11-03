@@ -45,6 +45,9 @@ abstract interface class HestiaRepository {
   /// 새 알림 스트림. 실시간 방식(MQTT/WebSocket/SSE)은 구현체가 정한다.
   Stream<HestiaNotification> watchNotifications();
 
+  /// 서버 데이터가 바뀌었다는 신호. 값은 담지 않으니 받으면 다시 읽는다.
+  Stream<void> watchChanges();
+
   /// 복약 일정. 등록하지 않았으면 빈 목록.
   Future<List<Medication>> getMedications();
 
