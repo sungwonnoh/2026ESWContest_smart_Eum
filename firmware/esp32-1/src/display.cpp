@@ -44,7 +44,7 @@ void displayBegin() {
 
     oled.setI2CAddress(OLED_ADDR << 1);
     oled.begin();
-    oled.setFont(u8g2_font_unifont_t_korean1);
+    oled.setFont(u8g2_font_unifont_t_korean2);
     oled.setFontPosTop();
     ready_ = true;
 
