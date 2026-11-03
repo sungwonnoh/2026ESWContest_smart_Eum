@@ -310,6 +310,10 @@ void loop() {
     consoleTick();
     displayTick();
 
+    if (notifies.expire(millis(), 300000)) {
+        publishDeviceState();
+    }
+
     #ifdef ACK_BUTTON_PIN
     if (buttonPressed(ackBtn_)) {
         // 콘솔의 seen 과 같은 길. isForMe 로 걸러 들어온 것만 들고 있다

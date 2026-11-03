@@ -4,6 +4,7 @@
 NotifyStore::NotifyStore() : seqCounter_(0) {
     for (uint8_t i = 0; i < MAX_ACTIVE; i++) {
         slots_[i].used = false;
+        slots_[i].order = 0;
         slots_[i].received_ms = 0;
     }
 }
@@ -14,7 +15,8 @@ void NotifyStore::add(const hestia::NotifyPush& push, uint32_t now_ms) {
         if (slots_[i].used &&
             strcmp(slots_[i].push.notify_id, push.notify_id) == 0) {
             slots_[i].push = push;
-            slots_[i].received_ms = ++seqCounter_;
+            slots_[i].order       = ++seqCounter_;
+            slots_[i].received_ms = now_ms;
             return;
         }
     }
@@ -23,7 +25,8 @@ void NotifyStore::add(const hestia::NotifyPush& push, uint32_t now_ms) {
     for (uint8_t i = 0; i < MAX_ACTIVE; i++) {
         if (!slots_[i].used) {
             slots_[i].push = push;
-            slots_[i].received_ms = ++seqCounter_;
+            slots_[i].order       = ++seqCounter_;
+            slots_[i].received_ms = now_ms;
             slots_[i].used = true;
             return;
         }
@@ -37,7 +40,19 @@ void NotifyStore::add(const hestia::NotifyPush& push, uint32_t now_ms) {
         }
     }
     slots_[oldest].push = push;
-    slots_[oldest].received_ms = ++seqCounter_;
+    slots_[oldest].order       = ++seqCounter_;
+    slots_[oldest].received_ms = now_ms;
+}
+
+bool NotifyStore::expire(uint32_t now_ms, uint32_t max_age_ms) {
+    bool dropped = false;
+    for (uint8_t i = 0; i < MAX_ACTIVE; i++) {
+        if (!slots_[i].used) continue;
+        if (now_ms - slots_[i].received_ms < max_age_ms) continue;
+        slots_[i].used = false;
+        dropped = true;
+    }
+    return dropped;
 }
 
 bool NotifyStore::remove(const char* notify_id) {
@@ -72,8 +87,8 @@ const hestia::NotifyPush* NotifyStore::latest() const {
     uint32_t bestSeq = 0;
 
     for (uint8_t i = 0; i < MAX_ACTIVE; i++) {
-        if (slots_[i].used && slots_[i].received_ms >= bestSeq) {
-            bestSeq = slots_[i].received_ms;
+        if (slots_[i].used && slots_[i].order >= bestSeq) {
+            bestSeq = slots_[i].order;
             best = &slots_[i].push;
         }
     }
