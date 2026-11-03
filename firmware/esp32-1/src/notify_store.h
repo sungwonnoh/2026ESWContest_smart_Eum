@@ -13,6 +13,9 @@ public:
     // 자리가 없으면 가장 오래된 것을 밀어낸다.
     void add(const hestia::NotifyPush& push, uint32_t now_ms);
 
+    // 오래된 것을 버린다. 지운 게 있으면 true.
+    bool expire(uint32_t now_ms, uint32_t max_age_ms);
+
     // notify_id 로 제거. 있었으면 true
     bool remove(const char* notify_id);
 
@@ -28,10 +31,11 @@ public:
 private:
     struct Slot {
         hestia::NotifyPush push;
-        uint32_t received_ms;
+        uint32_t order;          // 들어온 순서. latest() 판정용
+        uint32_t received_ms;    // millis(). 나이 판정용
         bool     used;
     };
 
     Slot    slots_[MAX_ACTIVE];
-    uint32_t seqCounter_;      // 들어온 순서. latest() 판정용
+    uint32_t seqCounter_;
 };
