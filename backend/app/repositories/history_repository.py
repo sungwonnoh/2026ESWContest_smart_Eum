@@ -227,11 +227,16 @@ class HistoryRepository:
         return _context(row) if row else None
 
     def list_explainable(self, limit: int = 20) -> list[ContextRecord]:
-        """설명할 근거가 있는 판단만. suppression 은 판단 결과가 아니라 제외한다."""
+        """설명할 근거가 있는 판단만, 상태가 바뀐 순서로. suppression 은 판단 결과가 아니라 제외한다.
+
+        행은 상태가 바뀔 때만 생기므로 id 가 곧 서버가 받은 변경 순서다. updated_at 은
+        쓰지 않는다. 엔진의 가상 시계로 찍힌 미래 시각이 남으면 새 판단을 가리고,
+        같은 상태의 재발행(5분 주기)만으로도 순서가 뒤집힌다.
+        """
         rows = self._db.query(
             "SELECT * FROM context_history WHERE context_name != 'suppression' "
             "AND (confidence IS NOT NULL OR (factors_json IS NOT NULL AND factors_json != '{}')) "
-            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            "ORDER BY id DESC LIMIT ?",
             (limit,),
         )
         return [_context(r) for r in rows]
