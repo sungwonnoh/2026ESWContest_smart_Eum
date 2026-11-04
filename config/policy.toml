@@ -446,7 +446,7 @@ pause_start = "22:00"
 pause_end = "06:00"
 
 [weather]
-max_age_sec = 7200 
+max_age_sec = 172800    # ★ 시연용 값이다. 운용값은 7200 (2시간).
 
 [scenarios.meal]
 pause_start = "21:00"
