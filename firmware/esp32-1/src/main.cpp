@@ -31,6 +31,7 @@ static uint32_t lastHeartbeat = 0;
 static uint32_t lastDeviceState = 0;
 
 static const uint32_t DEVICE_STATE_MS = 300000;   // 5분
+static const uint32_t NOTIFY_TTL_MS = 60000;
 
 static ButtonPin ackBtn_;
 
@@ -154,12 +155,7 @@ static void onNotifyCancel(const char* payload, size_t len) {
     }
     logInfo("NOTI", "cancel %s", nid);
 
-    const hestia::NotifyPush* top = notifies.latest();
-    if (top != nullptr) {
-        displayShow(top->title, top->text, top->priority);
-    } else {
-        displayClear();
-    }
+    displayClear();
     publishDeviceState();
 }
 
@@ -310,7 +306,7 @@ void loop() {
     consoleTick();
     displayTick();
 
-    if (notifies.expire(millis(), 300000)) {
+    if (notifies.expire(millis(), NOTIFY_TTL_MS)) {
         publishDeviceState();
     }
 
