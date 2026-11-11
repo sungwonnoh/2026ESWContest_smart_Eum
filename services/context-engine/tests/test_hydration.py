@@ -533,11 +533,12 @@ def test_advisory_blocks_heat_onset(c):
 
 
 def test_stale_weather_ignored(c):
-    """RPi4 가 죽으면 retained 로 남은 어제 날씨가 계속 보인다.
-    그것으로 오늘을 판단하면 안 된다."""
+    """오래된 날씨 데이터로 폭염 알림을 발생시키지 않는다."""
+    c.config.policy["weather"]["max_age_sec"] = 7200
+
     c.home()
     c.climate(temp=22.0)
-    weather(c, heat=True, age_sec=7300)      # max_age_sec 7200 초과
+    weather(c, heat=True, age_sec=7300)
     c.tick()
 
     assert "HEAT_ADVISORY" not in c.reasons()
