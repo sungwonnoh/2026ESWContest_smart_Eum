@@ -209,6 +209,7 @@ def test_first_safety_prompt_is_not_sent_to_caregiver(hestia):
     assert calls == []
 
 
+
 def test_escalated_safety_is_sent_to_caregiver(hestia):
     calls = []
     hestia.container.notifications._telegram = type(
@@ -216,8 +217,19 @@ def test_escalated_safety_is_sent_to_caregiver(hestia):
             "send_fall_escalation": lambda self, **kwargs: calls.append(kwargs),
         }
     )()
-    receive_one(hestia, notify_id="safety-escalated", scenario="SAFETY",
-                priority="safety", escalation_level=2,
-                payload={"title": "괜찮으신가요?", "text": "사용자 응답이 없습니다."})
+
+    receive_one(
+        hestia,
+        notify_id="safety-escalated",
+        scenario="SAFETY",
+        priority="safety",
+        escalation_level=2,
+        channels=["vd-05", "guardian"],
+        payload={
+            "title": "괜찮으신가요?",
+            "text": "사용자 응답이 없습니다.",
+        },
+    )
+
     assert calls[0]["notify_id"] == "safety-escalated"
     assert calls[0]["message"] == "사용자 응답이 없습니다."
